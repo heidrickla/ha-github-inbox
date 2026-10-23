@@ -12,7 +12,7 @@ The integration creates a private GitHub App for your account from inside the co
 
 | Part | What it shows |
 |---|---|
-| Tiles | Open issues, open pull requests (drafts counted apart), unseen items, items waiting on you, repositories, the oldest open item, and the last 7 days' activity with a sparkline. |
+| Tiles | Open issues, open pull requests (drafts counted apart), unseen items, items waiting on you, repositories, the oldest open item, and the last 7 days' activity with a sparkline. Click a tile to open its items: the first four filter the list (click again to clear), Repositories lists every item by repository, Oldest open opens that item, Activity goes to Recent activity. |
 | By repository | Issues, pull requests and drafts per repository as stacked bars. Click a bar to filter the list to that repository. |
 | Waiting on you | Items whose last word is someone else's, with the oldest listed. |
 | Age of open items | Open items by age: a day, a week, a month, three months, a year, older. |

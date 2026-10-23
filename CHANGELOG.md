@@ -2,6 +2,16 @@
 
 Everything a user of this integration would notice, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version numbers are the ones in `manifest.json`.
 
+## [0.1.4] - 2026-10-23
+
+### Added
+
+- The panel's tiles open their items in the list: open issues, open pull requests, unseen and waiting on you set the list's filter, a second press clears it; repositories lists every open item by repository; oldest open opens that item; activity goes to recent activity.
+
+### Fixed
+
+- A long title in Waiting on you is cut at the card's edge. It had run past the card and widened the page.
+
 ## [0.1.3] - 2026-10-23
 
 ### Fixed

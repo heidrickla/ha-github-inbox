@@ -22,6 +22,7 @@ input[type=search]{flex:1;min-width:10rem}
 .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 14px;display:flex;gap:12px;align-items:center;min-width:0}
 .tile .k{color:var(--muted);font-size:.8rem}.tile .v{font-size:1.5rem;font-weight:600;line-height:1.15}.tile .sub{color:var(--muted);font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tile .txt{min-width:0;flex:1}.tile .ico{flex:none;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--track)}
+.tile[data-act]{cursor:pointer}.tile[data-act]:hover{border-color:var(--faint);background:var(--hover)}.tile[aria-pressed=true]{border-color:var(--s1);box-shadow:inset 0 0 0 1px var(--s1)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(21rem,1fr));gap:12px;margin-top:12px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:0}.card.wide{grid-column:1/-1;margin-top:12px}
 .card h2{font-size:1rem;margin:0 0 10px;font-weight:600;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
@@ -43,7 +44,7 @@ input[type=search]{flex:1;min-width:10rem}
 .xl{display:flex;gap:6px;margin-top:4px}.xl span{flex:1;text-align:center;font-size:.72rem;color:var(--muted);white-space:nowrap;overflow:hidden}
 .cols.days{gap:3px}.xl.days{gap:3px}
 .split{display:flex;gap:16px;align-items:center}.ring{flex:none}
-.wl{display:grid;gap:6px;flex:1;min-width:0}.wl a{color:var(--text);text-decoration:none;display:flex;gap:8px;align-items:center;font-size:.84rem;cursor:pointer}
+.wl{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;flex:1;min-width:0}.wl a{color:var(--text);text-decoration:none;display:flex;gap:8px;align-items:center;font-size:.84rem;cursor:pointer;min-width:0}
 .wl a:hover .tt{text-decoration:underline}.wl .tt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
 .seg{display:inline-flex;background:var(--track);border:1px solid var(--line);border-radius:9px;padding:2px;gap:2px}
@@ -413,17 +414,45 @@ class GitHubInboxPanel extends HTMLElement {
       })
       .join("")}</div>`;
     const oldest = snap.oldest;
-    const tile = (icon, k, v, sub, extra = "") =>
-      `<div class="tile"><div class="ico">${icon}</div><div class="txt"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="sub">${sub}</div>` : ""}${extra}</div></div>`;
+    const tile = (icon, k, v, sub, extra = "", act = "") =>
+      `<div class="tile"${act}><div class="ico">${icon}</div><div class="txt"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="sub">${sub}</div>` : ""}${extra}</div></div>`;
+    const btn = (act, tip, more = "") => ` data-act="${act}" tabindex="0" role="button" data-tip="${esc(tip)}"${more}`;
+    const show = (filter, what) => btn("show", `Show ${what} in the list`, ` data-filter="${filter}" aria-pressed="${this._filter === filter}"`);
     el.innerHTML = [
-      tile(G.issue(cv("--s1")), "Open issues", t.issues, `${esc(snap.by_repo.filter((r) => r.issues).length)} repositories`),
-      tile(G.pr(cv("--s2")), "Open pull requests", t.prs, t.drafts ? `${t.drafts} draft${t.drafts === 1 ? "" : "s"}` : "no drafts"),
-      tile(`<span class="dot" style="width:12px;height:12px;background:var(--warn)"></span>`, "Unseen", t.unseen, `of ${open} open`),
-      tile(G.comment(cv("--s4")), "Waiting on you", t.waiting, "last word from someone else"),
-      tile(G.repo("var(--muted)"), "Repositories", t.repos, `with open items, of ${t.repos_installed} installed`),
-      tile(G.clock("var(--muted)"), "Oldest open", oldest ? span(oldest.created_at) : "-", oldest ? esc(oldest.key.split("/").pop()) : "nothing open"),
-      tile(G.pulse(cv("--s4")), "Activity, 7 days", t.activity_7d, "", spark),
+      tile(G.issue(cv("--s1")), "Open issues", t.issues, `${esc(snap.by_repo.filter((r) => r.issues).length)} repositories`, "", show("issue", "open issues")),
+      tile(G.pr(cv("--s2")), "Open pull requests", t.prs, t.drafts ? `${t.drafts} draft${t.drafts === 1 ? "" : "s"}` : "no drafts", "", show("pr", "open pull requests")),
+      tile(`<span class="dot" style="width:12px;height:12px;background:var(--warn)"></span>`, "Unseen", t.unseen, `of ${open} open`, "", show("unseen", "unseen items")),
+      tile(G.comment(cv("--s4")), "Waiting on you", t.waiting, "last word from someone else", "", show("waiting", "items waiting on you")),
+      tile(G.repo("var(--muted)"), "Repositories", t.repos, `with open items, of ${t.repos_installed} installed`, "", btn("by-repo", "List every open item by repository")),
+      tile(G.clock("var(--muted)"), "Oldest open", oldest ? span(oldest.created_at) : "-", oldest ? esc(oldest.key.split("/").pop()) : "nothing open", "",
+        oldest ? btn("goto", `Open ${oldest.key}`, ` data-key="${esc(oldest.key)}"`) : ""),
+      tile(G.pulse(cv("--s4")), "Activity, 7 days", t.activity_7d, "", spark, btn("recent", "Go to recent activity")),
     ].join("");
+  }
+
+  _markTiles() {
+    for (const el of this.shadowRoot.querySelectorAll('.tile[data-act="show"]')) {
+      el.setAttribute("aria-pressed", String(el.getAttribute("data-filter") === this._filter));
+    }
+  }
+
+  // Tile and chart counts span every repository, so a jump to the list drops the repository and text filters.
+  _reset(filter, sort = this._sort) {
+    const root = this.shadowRoot;
+    this._filter = filter;
+    this._sort = sort;
+    this._repo = "";
+    this._query = "";
+    root.getElementById("q").value = "";
+    root.getElementById("sort").value = sort;
+    this._markTiles();
+    this._renderToolbar();
+    this._renderCharts();
+    this._renderList();
+  }
+
+  _scrollTo(el) {
+    if (el) el.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 
   _renderCharts() {
@@ -712,8 +741,18 @@ ${isNew ? `<span class="chip new"><span class="dot" style="background:var(--warn
       this._renderItem(key);
     } else if (act === "filter") {
       this._filter = el.getAttribute("data-filter");
+      this._markTiles();
       this._renderToolbar();
       this._renderList();
+    } else if (act === "show") {
+      const filter = el.getAttribute("data-filter");
+      this._reset(this._filter === filter ? "all" : filter);
+      this._scrollTo(this.shadowRoot.getElementById("listcard"));
+    } else if (act === "by-repo") {
+      this._reset("all", "repo");
+      this._scrollTo(this.shadowRoot.getElementById("listcard"));
+    } else if (act === "recent") {
+      this._scrollTo(this.shadowRoot.getElementById("recent"));
     } else if (act === "repo") {
       const repo = el.getAttribute("data-repo");
       this._repo = this._repo === repo ? "" : repo;
@@ -721,16 +760,9 @@ ${isNew ? `<span class="chip new"><span class="dot" style="background:var(--warn
       this._renderToolbar();
       this._renderList();
     } else if (act === "goto") {
-      this._filter = "all";
-      this._repo = "";
-      this._query = "";
-      this.shadowRoot.getElementById("q").value = "";
-      this._renderToolbar();
-      this._renderCharts();
-      this._renderList();
+      this._reset("all");
       this._toggle(key, true);
-      const target = this.shadowRoot.querySelector(`.item[data-key="${CSS.escape(key)}"]`);
-      if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
+      this._scrollTo(this.shadowRoot.querySelector(`.item[data-key="${CSS.escape(key)}"]`));
     } else if (act === "sync") {
       this._hass.callWS({ type: "github_inbox/resync" }).catch(() => {});
     } else if (act === "seen-all") {
