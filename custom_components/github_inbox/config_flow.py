@@ -212,9 +212,11 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._forget()
                 return self.async_external_step_done(next_step_id="finish")
         if self._nonce is None:
-            self._wait(views.STAGE_INSTALL)
+            self._wait(
+                views.STAGE_INSTALL, install_url=f"{creds.html_url}/installations/new"
+            )
         return self.async_external_step(
-            step_id="install", url=f"{creds.html_url}/installations/new"
+            step_id="install", url=f"{self._base()}{views.INSTALL_PATH}/{self._nonce}"
         )
 
     async def async_step_finish(

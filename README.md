@@ -65,7 +65,7 @@ Then Settings, Devices & services, Add integration, GitHub Inbox:
 2. Press Create GitHub App. GitHub returns you to Home Assistant, and the dialog moves on to the app's install page on GitHub.
 3. Install it on all repositories, or a selection. GitHub returns you to Home Assistant and the setup finishes.
 
-From the Home Assistant app, the GitHub pages open in the phone's browser at another of Home Assistant's addresses: the Home Assistant Cloud address while the app uses the local one, the local address otherwise. On Android the start page first opens an `intent:` address that no app handles, so the browser keeps GitHub's pages instead of passing them to the GitHub app.
+From the Home Assistant app, the GitHub pages open in the phone's browser at another of Home Assistant's addresses: the Home Assistant Cloud address while the app uses the local one, the local address otherwise. On Android the create and install pages first open an `intent:` address that no app handles, so the browser keeps GitHub's pages and does not pass them to the GitHub app.
 
 The first sync reads every open issue and pull request; the panel fills as it completes.
 

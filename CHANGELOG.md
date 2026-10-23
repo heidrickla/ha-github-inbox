@@ -2,6 +2,12 @@
 
 Everything a user of this integration would notice, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version numbers are the ones in `manifest.json`.
 
+## [0.1.3] - 2026-10-23
+
+### Fixed
+
+- On Android with the GitHub app installed, Open website on the install step opens GitHub's install page in the browser. The GitHub app had shown a list of browsers first.
+
 ## [0.1.2] - 2026-10-23
 
 ### Fixed

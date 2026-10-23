@@ -128,7 +128,9 @@ async def through_github(hass: HomeAssistant, client: Any, result: Any) -> Any:
     result = await hass.config_entries.flow.async_configure(result["flow_id"])
     assert result["type"] is FlowResultType.EXTERNAL_STEP
     assert result["step_id"] == "install"
-    assert result["url"] == f"{APP_URL}/installations/new"
+    assert f"{views.INSTALL_PATH}/" in result["url"]
+    page = await (await client.get(f"{views.INSTALL_PATH}/{nonce_of(result)}")).text()
+    assert f'location.replace("{APP_URL}/installations/new")' in page
     resp = await client.get(f"{views.INSTALLED_PATH}?installation_id={INSTALLATION_ID}")
     assert resp.status == 200
     assert "finishes the setup" in await resp.text()
@@ -335,6 +337,38 @@ async def test_an_android_browser_hops_through_a_failed_app_launch_first(
     assert ("'?go=1'" in page) is hops
     assert ("getElementById('f').submit()" in page) is not hops
     hass.config_entries.flow.async_abort(result["flow_id"])
+
+
+@pytest.mark.parametrize(
+    ("agent", "hops"),
+    [
+        ("Mozilla/5.0 (Linux; Android 16; Pixel 11) Chrome/150.0 Mobile", True),
+        ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/150.0", False),
+    ],
+)
+async def test_the_install_page_hops_on_android_then_opens_github(
+    hass: HomeAssistant,
+    hass_client_no_auth: Any,
+    github_ready: GitHub,
+    mock_route: dict[str, MagicMock],
+    agent: str,
+    hops: bool,
+) -> None:
+    result = await start(hass)
+    client = await hass_client_no_auth()
+    await client.get(f"{views.CREATED_PATH}?state={nonce_of(result)}&code={CODE}")
+    result = await hass.config_entries.flow.async_configure(result["flow_id"])
+    nonce = nonce_of(result)
+    url = f"{views.INSTALL_PATH}/{nonce}"
+    page = await (await client.get(url, headers={"User-Agent": agent})).text()
+    assert ("intent://#Intent;scheme=github-inbox-stay;" in page) is hops
+    opens = f'location.replace("{APP_URL}/installations/new")'
+    assert (opens in page) is not hops
+    page = await (await client.get(f"{url}?go=1", headers={"User-Agent": agent})).text()
+    assert opens in page
+    assert (await client.get(f"{views.START_PATH}/{nonce}")).status == 404
+    hass.config_entries.flow.async_abort(result["flow_id"])
+    assert (await client.get(url)).status == 404
 
 
 async def test_an_organization_app(

@@ -1,7 +1,8 @@
 """The pages the config flow's GitHub steps pass through.
 
 The flow opens `/api/github_inbox/start/<nonce>`, which posts the app manifest to GitHub. GitHub returns the browser to
-`/api/github_inbox/created` with a code, and after the installation to `/api/github_inbox/installed`. The browser has
+`/api/github_inbox/created` with a code. The flow then opens `/api/github_inbox/install/<nonce>`, which goes on to
+GitHub's install page, and GitHub returns the browser to `/api/github_inbox/installed`. The browser has
 left Home Assistant for these, so they carry no login. Each answers only for a flow that is waiting: the nonce is
 random per flow and doubles as the manifest's state, and an installation id is accepted only by a flow whose own app
 can read that installation.
@@ -25,13 +26,14 @@ from homeassistant.util.hass_dict import HassKey
 from .const import DOMAIN
 
 START_PATH = "/api/github_inbox/start"
+INSTALL_PATH = "/api/github_inbox/install"
 CREATED_PATH = "/api/github_inbox/created"
 INSTALLED_PATH = "/api/github_inbox/installed"
 STAGE_CREATE = "create"
 STAGE_INSTALL = "install"
 _ID_RE = re.compile(r"[0-9]{1,19}")
-# Android Chrome and its forks hand GitHub's redirect after the post to the GitHub app, away from the browser holding
-# the manifest. An app launch that fails first keeps the rest of the navigation in the browser (crbug.com/330555390).
+# Android Chrome and its forks hand github.com pages to the GitHub app, away from the browser holding the manifest
+# and the sign-in. An app launch that fails first keeps the rest of the navigation in the browser (crbug.com/330555390).
 HOP = "intent://#Intent;scheme=github-inbox-stay;S.browser_fallback_url="
 
 
@@ -41,6 +43,16 @@ class Pending:
     stage: str
     post_url: str = ""
     manifest: dict[str, Any] = field(default_factory=dict)
+    install_url: str = ""
+
+
+def _then(request: web.Request, action: str) -> str:
+    """The page script's last statement, after the hop on Android."""
+    if request.query.get("go") == "1" or "Android" not in request.headers.get(
+        hdrs.USER_AGENT, ""
+    ):
+        return action
+    return f"location.replace({json.dumps(HOP)}+encodeURIComponent(location.origin+location.pathname+'?go=1')+';end')"
 
 
 DATA_PENDING: HassKey[dict[str, Pending]] = HassKey(f"{DOMAIN}_pending")
@@ -60,6 +72,7 @@ def async_setup(hass: HomeAssistant) -> None:
         return
     hass.data[DATA_VIEWS] = True
     hass.http.register_view(StartView())
+    hass.http.register_view(InstallView())
     hass.http.register_view(CreatedView())
     hass.http.register_view(InstalledView())
 
@@ -121,12 +134,7 @@ class StartView(HomeAssistantView):
             "setup_url": origin + INSTALLED_PATH,
         }
         action = f"{item.post_url}?state={nonce}"
-        go = (
-            "document.getElementById('f').submit()"
-            if request.query.get("go") == "1"
-            or "Android" not in request.headers.get(hdrs.USER_AGENT, "")
-            else f"location.replace({json.dumps(HOP)}+encodeURIComponent(location.origin+location.pathname+'?go=1')+';end')"
-        )
+        go = _then(request, "document.getElementById('f').submit()")
         body = (
             "<p>Sending the app's description to GitHub. Check the name, then press "
             "Create GitHub App.</p>"
@@ -142,6 +150,26 @@ class StartView(HomeAssistantView):
             f"m.value=JSON.stringify(v);{go}</script>"
         )
         return page("Creating the GitHub App", body, script)
+
+
+class InstallView(HomeAssistantView):
+    """Opens GitHub's install page for the app the flow created."""
+
+    url = INSTALL_PATH + "/{nonce}"
+    name = "api:github_inbox:install"
+    requires_auth = False
+
+    async def get(self, request: web.Request, nonce: str) -> web.Response:
+        item = pending(request.app[KEY_HASS]).get(nonce)
+        if item is None or item.stage != STAGE_INSTALL or not item.install_url:
+            return gone_page()
+        target = json.dumps(item.install_url).replace("<", "\\u003c")
+        body = (
+            "<p>Opening GitHub. Choose the repositories, then press Install.</p>"
+            f'<p><a href="{escape(item.install_url)}">Continue to GitHub</a></p>'
+        )
+        script = f"<script>{_then(request, f'location.replace({target})')}</script>"
+        return page("Installing the GitHub App", body, script)
 
 
 class CreatedView(HomeAssistantView):
