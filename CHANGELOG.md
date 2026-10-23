@@ -2,6 +2,12 @@
 
 Everything a user of this integration would notice, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version numbers are the ones in `manifest.json`.
 
+## [0.1.1] - 2026-10-23
+
+### Fixed
+
+- Setup started from the Home Assistant app opens GitHub's create page in the phone's browser, at another of Home Assistant's addresses, where GitHub has your sign-in. GitHub had answered "We didn't find an App Manifest for your request".
+
 ## [0.1.0] - 2026-10-23
 
 ### Added

@@ -12,6 +12,7 @@ import secrets
 from typing import Any, override
 
 import voluptuous as vol
+from aiohttp import hdrs
 from homeassistant.components import webhook
 from homeassistant.config_entries import (
     SOURCE_REAUTH,
@@ -31,6 +32,7 @@ from homeassistant.helpers.selector import (
     TextSelector,
     TextSelectorConfig,
 )
+from yarl import URL
 
 from . import model, route, views
 from .api import (
@@ -73,6 +75,8 @@ from .const import (
 )
 from .coordinator import InboxConfigEntry
 
+# Home Assistant's Android and iOS apps append this to their web view's user agent.
+COMPANION_RE = re.compile(r"\bHome Assistant/\S+ \(")
 ORG_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 NAME_MAX = 34
 GITHUB = "https://github.com"
@@ -380,12 +384,27 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
     def _base(self) -> str:
         """The origin the browser uses for Home Assistant; GitHub sends it back there."""
         request = current_request.get()
-        if request is not None:
-            return f"{request.scheme}://{request.host}"
-        try:
-            return get_url(self.hass)
-        except NoURLAvailableError:
-            return ""
+        if request is None:
+            try:
+                return get_url(self.hass)
+            except NoURLAvailableError:
+                return ""
+        origin = f"{request.scheme}://{request.host}"
+        if not COMPANION_RE.search(request.headers.get(hdrs.USER_AGENT, "")):
+            return origin
+        # The companion apps load their own origin in a web view without the GitHub session and
+        # hand any other origin to the browser, so the start page goes to another address.
+        for where in (
+            {"allow_internal": False, "prefer_cloud": True},
+            {"allow_external": False},
+        ):
+            try:
+                url = get_url(self.hass, **where)
+            except NoURLAvailableError:
+                continue
+            if URL(url).origin() != URL(origin).origin():
+                return url
+        return origin
 
     def _wait(self, stage: str, **extra: Any) -> None:
         views.async_setup(self.hass)

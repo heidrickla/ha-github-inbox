@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -220,6 +221,77 @@ async def test_github_returns_to_the_origin_the_browser_used(
     base = client.make_url("/")
     origin = f"{base.scheme}://{base.host}:{base.port}"
     assert step["url"].startswith(f"{origin}{views.START_PATH}/")
+    hass.config_entries.flow.async_abort(flow["flow_id"])
+
+
+APP_AGENT = "Mozilla/5.0 (Linux; Android 16) Home Assistant/2026.10.1-full (Android 16; Pixel 9)"
+
+
+def urls(cloud: str | None, internal: str | None) -> Callable[..., str]:
+    def get_url(hass: HomeAssistant, **where: Any) -> str:
+        url = internal if where.get("allow_external") is False else cloud
+        if url is None:
+            raise NoURLAvailableError
+        return url
+
+    return get_url
+
+
+@pytest.mark.parametrize(
+    ("host", "cloud", "internal", "expected"),
+    [
+        (
+            None,
+            "https://abc.ui.nabu.casa",
+            "https://homeassistant.example:8123",
+            "https://abc.ui.nabu.casa",
+        ),
+        (
+            "abc.ui.nabu.casa",
+            "http://abc.ui.nabu.casa",
+            "https://homeassistant.example:8123",
+            "https://homeassistant.example:8123",
+        ),
+        (
+            None,
+            None,
+            "https://homeassistant.example:8123",
+            "https://homeassistant.example:8123",
+        ),
+        (None, None, None, None),
+    ],
+)
+async def test_the_companion_app_is_sent_to_another_address(
+    hass: HomeAssistant,
+    hass_client: Any,
+    host: str | None,
+    cloud: str | None,
+    internal: str | None,
+    expected: str | None,
+) -> None:
+    for domain in ("config", "webhook", DOMAIN):
+        assert await async_setup_component(hass, domain, {})
+    client = await hass_client()
+    headers = {"User-Agent": APP_AGENT}
+    if host:
+        headers["Host"] = host
+    resp = await client.post(
+        "/api/config/config_entries/flow", json={"handler": DOMAIN}, headers=headers
+    )
+    flow = await resp.json()
+    with patch(
+        "custom_components.github_inbox.config_flow.get_url", urls(cloud, internal)
+    ):
+        resp = await client.post(
+            f"/api/config/config_entries/flow/{flow['flow_id']}",
+            json={CONF_APP_NAME: "HA Inbox test", CONF_ROUTE: ROUTE_CLOUD},
+            headers=headers,
+        )
+    step = await resp.json()
+    if expected is None:
+        base = client.make_url("/")
+        expected = f"{base.scheme}://{base.host}:{base.port}"
+    assert step["url"].startswith(f"{expected}{views.START_PATH}/")
     hass.config_entries.flow.async_abort(flow["flow_id"])
 
 

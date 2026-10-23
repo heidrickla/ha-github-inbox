@@ -65,6 +65,8 @@ Then Settings, Devices & services, Add integration, GitHub Inbox:
 2. Press Create GitHub App. GitHub returns you to Home Assistant, and the dialog moves on to the app's install page on GitHub.
 3. Install it on all repositories, or a selection. GitHub returns you to Home Assistant and the setup finishes.
 
+From the Home Assistant app, the GitHub pages open in the phone's browser at another of Home Assistant's addresses: the Home Assistant Cloud address while the app uses the local one, the local address otherwise.
+
 The first sync reads every open issue and pull request; the panel fills as it completes.
 
 ### Installation parameters
@@ -178,6 +180,7 @@ A dashboard badge for unseen items: add `sensor.github_heidrickla_unseen` as a b
 | The panel says Sync failed | Hover the chip for GitHub's answer. A rate limit or an outage clears on the next retry; Sync now retries at once. |
 | A page says "Nothing is waiting" | The setup was closed or restarted. Start it again from Devices & services. |
 | GitHub refuses the app name | Another app has it. Go back and choose another. |
+| GitHub says it didn't find an App Manifest | The create page opened where GitHub has no sign-in. Start the setup again from a browser, or from the app with a second address for Home Assistant (Home Assistant Cloud or a local URL). |
 | Last delivery is old | Enable the Last delivery sensor; compare it with GitHub's Recent Deliveries. |
 
 Diagnostics (the integration's three dots, Download diagnostics) carry the sync state and counts, with the key, the webhook secret, the webhook id and the notify services redacted, and no titles or bodies.
