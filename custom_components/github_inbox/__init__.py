@@ -37,6 +37,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     websocket.async_setup(hass)
     views.async_setup(hass)
     await panel.async_setup_static(hass)
+    route.async_sweep_when_connected(hass)
     return True
 
 

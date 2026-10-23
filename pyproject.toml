@@ -1,6 +1,6 @@
 [project]
 name = "ha-github-inbox"
-version = "0.1.4"
+version = "0.1.5"
 description = "Open issues and pull requests across your GitHub repositories in Home Assistant, pushed by a GitHub App's webhook."
 # Home Assistant 2026.x requires 3.14, and ruff at target-version py314 writes
 # except groups unparenthesized, which 3.13 refuses to parse.

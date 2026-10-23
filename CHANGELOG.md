@@ -2,6 +2,12 @@
 
 Everything a user of this integration would notice, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version numbers are the ones in `manifest.json`.
 
+## [0.1.5] - 2026-10-23
+
+### Fixed
+
+- A setup cut off by a Home Assistant restart while it waited on GitHub no longer leaves its Home Assistant Cloud webhook behind. The integration records each cloudhook it makes and, at startup and when a setup opens, deletes those that no entry on the cloud route and no open setup uses.
+
 ## [0.1.4] - 2026-10-23
 
 ### Added

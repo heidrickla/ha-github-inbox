@@ -7,7 +7,7 @@ import json
 import re
 from collections.abc import Callable
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.config_entries import SOURCE_USER
@@ -183,6 +183,23 @@ async def test_the_whole_setup(
     await hass.async_block_till_done(wait_background_tasks=True)
     mock_route["delete"].assert_not_called()
     assert views.pending(hass) == {}
+    assert held(hass) == {}
+
+
+def held(hass: HomeAssistant) -> dict[str, int]:
+    return dict(hass.data.get(route.DATA_HELD) or {})
+
+
+async def test_opening_the_form_sweeps_cloudhooks_left_by_a_restart(
+    hass: HomeAssistant,
+) -> None:
+    with patch(f"{route.__name__}.async_sweep", AsyncMock()) as sweep:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+        await hass.async_block_till_done(wait_background_tasks=True)
+    sweep.assert_awaited_once_with(hass)
+    hass.config_entries.flow.async_abort(result["flow_id"])
 
 
 async def test_the_whole_setup_on_the_external_route(
@@ -446,9 +463,11 @@ async def test_a_closed_flow_drops_its_cloudhook_and_pages(
 ) -> None:
     result = await start(hass)
     nonce = nonce_of(result)
+    webhook_id = mock_route["hook"].await_args.args[1]
+    assert held(hass) == {webhook_id: 1}
     hass.config_entries.flow.async_abort(result["flow_id"])
     await hass.async_block_till_done()
-    webhook_id = mock_route["hook"].await_args.args[1]
+    assert held(hass) == {}
     mock_route["delete"].assert_awaited_once_with(hass, webhook_id)
     client = await hass_client_no_auth()
     assert (await client.get(f"{views.START_PATH}/{nonce}")).status == 404
@@ -810,6 +829,7 @@ async def test_reconfigure_moves_the_webhook_onto_the_cloud(
     assert result["reason"] == "reconfigure_successful"
     assert loaded_external.data[CONF_CLOUDHOOK] is True
     mock_route["delete"].assert_not_called()
+    assert held(hass) == {}
 
 
 async def test_a_cloudhook_github_was_not_told_about_is_dropped(
@@ -826,6 +846,10 @@ async def test_a_cloudhook_github_was_not_told_about_is_dropped(
     assert result["errors"] == {"base": "cannot_connect"}
     assert loaded_external.data[CONF_CLOUDHOOK] is False
     mock_route["delete"].assert_awaited_once_with(hass, WEBHOOK_ID)
+    # The form is still open, so the flow keeps its hold until it closes.
+    assert held(hass) == {WEBHOOK_ID: 1}
+    hass.config_entries.flow.async_abort(result["flow_id"])
+    assert held(hass) == {}
 
 
 # --------------------------------------------------------------- options

@@ -118,6 +118,7 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
         self._installation: dict[str, Any] | None = None
         # Set once the webhook belongs to an entry, so closing the flow keeps its cloudhook.
         self._keep_hook = False
+        self._held: set[str] = set()
 
     @staticmethod
     @callback
@@ -135,6 +136,10 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
         if not routes:
             return self.async_abort(reason="no_route")
         errors: dict[str, str] = {}
+        if user_input is None:
+            self.hass.async_create_background_task(
+                route.async_sweep(self.hass), f"{DOMAIN} cloudhook sweep"
+            )
         if user_input is not None:
             name = str(user_input[CONF_APP_NAME]).strip()
             org = str(user_input.get(CONF_ORGANIZATION) or "").strip()
@@ -147,6 +152,7 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors[CONF_ROUTE] = "route_unavailable"
             else:
                 self._webhook_id = self._webhook_id or webhook.async_generate_id()
+                self._hold(self._webhook_id)
                 try:
                     hook_url = await route.async_hook_url(
                         self.hass, self._webhook_id, chosen
@@ -335,6 +341,7 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
                 int(entry.data[CONF_APP_ID]),
                 entry.data[CONF_PRIVATE_KEY],
             )
+            self._hold(entry.data[CONF_WEBHOOK_ID])
             try:
                 url = await route.async_hook_url(
                     self.hass, entry.data[CONF_WEBHOOK_ID], chosen
@@ -421,10 +428,18 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
             views.pending(self.hass).pop(self._nonce, None)
             self._nonce = None
 
+    def _hold(self, webhook_id: str) -> None:
+        if webhook_id not in self._held:
+            self._held.add(webhook_id)
+            route.hold(self.hass, webhook_id)
+
     @callback
     @override
     def async_remove(self) -> None:
         self._forget()
+        for webhook_id in self._held:
+            route.release(self.hass, webhook_id)
+        self._held.clear()
         if self._webhook_id and not self._keep_hook and self._route == ROUTE_CLOUD:
             self.hass.async_create_background_task(
                 route.async_delete_cloudhook(self.hass, self._webhook_id),

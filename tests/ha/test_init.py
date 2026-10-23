@@ -79,6 +79,17 @@ async def test_setup_syncs_every_open_item(
     assert coordinator.store.data["repos"] == ["heidrickla/empty", REPO]
 
 
+async def test_setup_sweeps_cloudhooks_left_by_a_restart(
+    hass: HomeAssistant, config_entry: MockConfigEntry, github: GitHub
+) -> None:
+    seed(github)
+    with patch(
+        "custom_components.github_inbox.route.async_sweep_when_connected"
+    ) as sweep:
+        await setup_entry(hass, config_entry)
+    sweep.assert_called_once_with(hass)
+
+
 async def test_a_second_sync_reads_only_what_changed(
     hass: HomeAssistant, config_entry: MockConfigEntry, github: GitHub
 ) -> None:

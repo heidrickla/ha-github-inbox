@@ -69,6 +69,8 @@ From the Home Assistant app, the GitHub pages open in the phone's browser at ano
 
 The first sync reads every open issue and pull request; the panel fills as it completes.
 
+A setup that is closed, or cut off by a restart, leaves no cloudhook behind: the integration records each cloudhook it makes and deletes those no entry or open setup uses, at startup and whenever a setup opens.
+
 ### Installation parameters
 
 | Parameter | Meaning |
