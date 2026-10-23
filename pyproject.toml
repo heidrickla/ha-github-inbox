@@ -1,0 +1,56 @@
+[project]
+name = "ha-github-inbox"
+version = "0.1.0"
+description = "Open issues and pull requests across your GitHub repositories in Home Assistant, pushed by a GitHub App's webhook."
+# Home Assistant 2026.x requires 3.14, and ruff at target-version py314 writes
+# except groups unparenthesized, which 3.13 refuses to parse.
+requires-python = ">=3.14"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 88
+extend-exclude = ["custom_components/github_inbox/brand"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    # Long docstrings and messages read better whole; ruff format wraps code.
+    "E501",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# pytest-homeassistant-custom-component's `hass` fixture is async.
+asyncio_mode = "auto"
+
+# Home Assistant core's generated mypy.ini [mypy] block (2026.8.3) plus
+# `strict`. python_version and platform are pinned so every run resolves the
+# same branches of Home Assistant's own source.
+[tool.mypy]
+python_version = "3.14"
+platform = "linux"
+strict = true
+local_partial_types = true
+no_implicit_optional = true
+strict_bytes = true
+warn_unreachable = true
+extra_checks = false
+enable_error_code = [
+    "deprecated",
+    "explicit-override",
+    "ignore-without-code",
+    "redundant-self",
+    "truthy-iterable",
+]
+disable_error_code = ["annotation-unchecked", "import-not-found", "import-untyped"]
+follow_imports = "normal"
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+disallow_incomplete_defs = false
+disallow_any_generics = false
+warn_return_any = false

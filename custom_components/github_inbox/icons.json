@@ -1,0 +1,28 @@
+{
+  "entity": {
+    "event": {
+      "activity": {
+        "default": "mdi:bell-ring-outline"
+      }
+    },
+    "sensor": {
+      "open_issues": {
+        "default": "mdi:record-circle-outline"
+      },
+      "open_pull_requests": {
+        "default": "mdi:source-pull"
+      },
+      "unseen": {
+        "default": "mdi:email-mark-as-unread"
+      },
+      "last_delivery": {
+        "default": "mdi:webhook"
+      }
+    }
+  },
+  "services": {
+    "resync": {
+      "service": "mdi:sync"
+    }
+  }
+}

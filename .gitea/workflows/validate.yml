@@ -1,0 +1,159 @@
+name: Validate
+
+# The jobs that install Home Assistant are workflow_dispatch only. An ordinary
+# push runs the lint job alone. .github/workflows/tests.yml runs the same two
+# suites on every push.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint and structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        timeout-minutes: 15
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        timeout-minutes: 15
+        with:
+          python-version: "3.14"
+
+      # A venv of the job's own: the image's Python is externally managed, and
+      # the runner's toolcache Python carries other repos' packages.
+      # Pinned: an unpinned linter makes CI non-reproducible.
+      - name: Install ruff and PyYAML (PINNED)
+        timeout-minutes: 15
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --quiet "ruff==0.15.21" "PyYAML==6.0.2"
+          "$RUNNER_TEMP/venv/bin/python" -m ruff --version
+
+      - name: Ruff
+        timeout-minutes: 15
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" -m ruff check .
+          "$RUNNER_TEMP/venv/bin/python" -m ruff format --check .
+
+      - name: JSON is valid
+        timeout-minutes: 15
+        run: |
+          for f in custom_components/github_inbox/*.json custom_components/github_inbox/translations/*.json hacs.json; do
+            "$RUNNER_TEMP/venv/bin/python" -c "import json,sys; json.load(open(sys.argv[1],encoding='utf-8'))" "$f" || exit 1
+          done
+          echo "all JSON valid"
+
+      - name: Manifest sanity
+        timeout-minutes: 15
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" - <<'PY'
+          import json
+          m = json.load(open("custom_components/github_inbox/manifest.json", encoding="utf-8"))
+          missing = [k for k in ("domain","name","version","documentation","codeowners") if not m.get(k)]
+          assert not missing, f"manifest missing: {missing}"
+          assert m["domain"] == "github_inbox", m["domain"]
+          # A custom integration without a version silently fails to load.
+          assert m["version"], "version is required for a custom integration"
+          assert "quality_scale" not in m, "the badge is core-only"
+          print("manifest ok:", m["domain"], m["version"])
+          PY
+
+      - name: Quality scale is complete and honest
+        timeout-minutes: 15
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" - <<'PY'
+          import json, yaml
+          rules = yaml.safe_load(open(
+              "custom_components/github_inbox/quality_scale.yaml", encoding="utf-8"))["rules"]
+          todo = sorted(k for k, v in rules.items()
+                        if isinstance(v, dict) and v.get("status") == "todo")
+          for name, v in rules.items():
+              if isinstance(v, dict):
+                  assert v.get("status") in {"done","todo","exempt"}, name
+                  if v.get("status") != "done":
+                      assert str(v.get("comment","")).strip(), f"{name}: needs a reason"
+              else:
+                  assert v == "done", name
+          claimed = json.load(open(
+              "custom_components/github_inbox/manifest.json", encoding="utf-8")
+          ).get("quality_scale")
+          assert not (claimed and todo), f"manifest claims {claimed} with todo: {todo}"
+          print(f"{len(rules)} rules; still todo: {', '.join(todo) or 'none'}")
+          PY
+
+  # The only job with Home Assistant installed, so it runs tests/ha/ and
+  # mypy strict.
+  home-assistant:
+    name: Home Assistant layer
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        timeout-minutes: 15
+
+      # Home Assistant 2026.x needs 3.14: with an older Python, pip silently
+      # resolves the newest test package that still supports it, which is an
+      # old Home Assistant, and a pinned current one cannot be found at all.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        timeout-minutes: 15
+        with:
+          python-version: "3.14"
+
+      # A virtual environment of the job's own, so it neither inherits nor
+      # leaves anything in the setup-python toolcache.
+      #
+      # pytest-homeassistant-custom-component pins Home Assistant exactly;
+      # 0.13.357 is Home Assistant 2026.8.3, the version this was verified on.
+      - name: Install
+        timeout-minutes: 15
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --quiet --upgrade pip
+          .venv/bin/python -m pip install --quiet "mypy==1.18.2" "pytest-homeassistant-custom-component==0.13.357"
+
+      - name: Tests
+        timeout-minutes: 15
+        run: |
+          .venv/bin/python -m pytest --durations=15 --junitxml=reports/junit.xml tests \
+            --cov=custom_components/github_inbox --cov-report=term-missing --cov-fail-under=95
+
+      - name: mypy strict
+        timeout-minutes: 15
+        run: .venv/bin/python -m mypy custom_components/github_inbox
+
+      # The name half of the tree scan is the only rule that reaches a
+      # development host under a public domain, where no address rule and no
+      # suffix rule can. The names come from a secret because naming them in
+      # the tree is the disclosure the rule exists to prevent, and it is set
+      # here and not in .github/workflows/tests.yml because the failure line
+      # prints the name it matched and that job's log is public. Unset, the
+      # run reports 0 names and the address and suffix rules still apply.
+      - name: Offline HACS and hassfest checks
+        timeout-minutes: 15
+        env:
+          HA_DEV_HOST_NAMES: ${{ secrets.HA_DEV_HOST_NAMES }}
+        run: .venv/bin/python tools/validate_local.py
+
+      # each test's time and result, kept whatever the outcome: the forge shows no job log
+      - name: test results
+        if: always()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
+        with:
+          name: test-results-${{ github.job }}
+          path: reports/
+          retention-days: 14
+
+  # hacs/action reads the repository through the GitHub API, so it cannot
+  # check this tree here; .github/workflows/validate.yml runs it on GitHub.
+  hassfest:
+    name: hassfest
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        timeout-minutes: 15
+      - uses: home-assistant/actions/hassfest@cd6f3635a740c84d8a14f6121a90068b8ece6bf6 # master
+        timeout-minutes: 15

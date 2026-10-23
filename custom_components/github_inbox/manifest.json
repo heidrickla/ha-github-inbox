@@ -1,0 +1,14 @@
+{
+  "domain": "github_inbox",
+  "name": "GitHub Inbox",
+  "after_dependencies": ["cloud", "frontend", "panel_custom"],
+  "codeowners": ["@heidrickla"],
+  "config_flow": true,
+  "dependencies": ["http", "webhook"],
+  "documentation": "https://github.com/heidrickla/ha-github-inbox",
+  "integration_type": "service",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/heidrickla/ha-github-inbox/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

@@ -1,0 +1,157 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Create the GitHub App",
+        "description": "Home Assistant creates a private GitHub App with read-only access to issues, pull requests and repository metadata. GitHub then shows it for confirmation and asks which repositories to install it on.",
+        "data": {
+          "app_name": "App name",
+          "organization": "Organization",
+          "route": "Webhook route"
+        },
+        "data_description": {
+          "app_name": "Unique across GitHub, at most 34 characters.",
+          "organization": "Leave empty to create the app on your personal account.",
+          "route": "How GitHub reaches this Home Assistant."
+        }
+      },
+      "create": {
+        "title": "Create the app on GitHub",
+        "description": "Open GitHub, check the app's name and press Create GitHub App. This dialog continues by itself."
+      },
+      "install": {
+        "title": "Install the app",
+        "description": "Install the app on all repositories or a selection. This dialog continues by itself once GitHub returns."
+      },
+      "reauth_confirm": {
+        "title": "Reconnect GitHub Inbox",
+        "description": "GitHub no longer accepts the inbox for {account}: the app was uninstalled, suspended or deleted. Submit to reinstall it, or to create a new app if it was deleted."
+      },
+      "reconfigure": {
+        "title": "Webhook route",
+        "description": "Moves the webhook of {account}'s app. GitHub is told the new address.",
+        "data": {
+          "route": "Webhook route"
+        }
+      }
+    },
+    "error": {
+      "invalid_name": "Give the app a name of at most 34 characters.",
+      "invalid_organization": "That is not a GitHub organization name.",
+      "route_unavailable": "That route cannot carry webhooks now.",
+      "cannot_connect": "GitHub could not be reached.",
+      "invalid_auth": "GitHub refused the app's key.",
+      "suspended": "The app is suspended on GitHub. Unsuspend it in the account's installed apps, then submit again."
+    },
+    "abort": {
+      "no_route": "GitHub cannot reach this Home Assistant: sign in to Home Assistant Cloud or set an external URL.",
+      "conversion_failed": "GitHub did not hand over the new app's credentials. The code lasts one hour; start again.",
+      "cannot_connect": "The app is installed but its repositories could not be read.",
+      "already_configured": "This GitHub account already has an inbox.",
+      "wrong_account": "The app is installed on a different account than this inbox's.",
+      "reauth_successful": "The inbox is reconnected.",
+      "reconfigure_successful": "GitHub now delivers to the new route."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Notifications",
+        "data": {
+          "notify_targets": "Notify services",
+          "persistent_notification": "Home Assistant notification",
+          "notify_on": "Notify on",
+          "include_bots": "Include bots",
+          "include_own": "Include my own activity"
+        },
+        "data_description": {
+          "notify_targets": "For example the companion app's mobile_app service. A tap opens the inbox at the item.",
+          "persistent_notification": "Also post to Home Assistant's notification list.",
+          "include_bots": "Dependabot, Renovate and other bot accounts.",
+          "include_own": "Activity by the account that owns the inbox."
+        }
+      }
+    }
+  },
+  "selector": {
+    "route": {
+      "options": {
+        "cloud": "Home Assistant Cloud",
+        "external": "External URL"
+      }
+    },
+    "notify_on": {
+      "options": {
+        "opened": "New and reopened issues and pull requests",
+        "comments": "Comments",
+        "reviews": "Reviews",
+        "closed": "Closed and merged"
+      }
+    }
+  },
+  "entity": {
+    "event": {
+      "activity": {
+        "name": "Activity",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "opened": "Opened",
+              "reopened": "Reopened",
+              "closed": "Closed",
+              "merged": "Merged",
+              "commented": "Commented",
+              "reviewed": "Reviewed"
+            }
+          }
+        }
+      }
+    },
+    "sensor": {
+      "open_issues": {
+        "name": "Open issues"
+      },
+      "open_pull_requests": {
+        "name": "Open pull requests"
+      },
+      "unseen": {
+        "name": "Unseen"
+      },
+      "last_delivery": {
+        "name": "Last delivery"
+      }
+    }
+  },
+  "exceptions": {
+    "auth_failed": {
+      "message": "GitHub no longer accepts this inbox's app or installation."
+    },
+    "cannot_connect": {
+      "message": "GitHub could not be reached: {error}"
+    },
+    "sync_failed": {
+      "message": "The inbox could not be read from GitHub: {error}"
+    },
+    "webhook_taken": {
+      "message": "Another integration holds this inbox's webhook id."
+    },
+    "not_loaded": {
+      "message": "No GitHub Inbox is loaded."
+    },
+    "resync_failed": {
+      "message": "Resync failed for {accounts}."
+    }
+  },
+  "issues": {
+    "webhook_route": {
+      "title": "GitHub cannot reach the inbox for {account}",
+      "description": "The inbox's webhook route is not available: Home Assistant Cloud is signed out or has no subscription, or the external URL is gone. Restore it, or move the webhook with the integration's Reconfigure."
+    }
+  },
+  "services": {
+    "resync": {
+      "name": "Resync",
+      "description": "Reads every open issue and pull request from GitHub again. Webhooks keep the inbox current; this recovers from anything they missed."
+    }
+  }
+}
