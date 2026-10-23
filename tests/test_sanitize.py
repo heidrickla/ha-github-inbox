@@ -164,3 +164,55 @@ def test_preview_is_one_line_cut_at_a_word() -> None:
     assert out.endswith("…")
     assert len(out) <= 31
     assert preview("<p>" + "x" * 50 + "</p>", limit=10) == "x" * 10 + "…"
+
+
+@pytest.mark.parametrize(
+    ("raw", "escaped"),
+    [
+        (
+            'https://github.com/a"onmouseover="x',
+            "https://github.com/a&quot;onmouseover=&quot;x",
+        ),
+        ("https://github.com/a'b", "https://github.com/a&#x27;b"),
+        ("https://github.com/a<b>c", "https://github.com/a&lt;b&gt;c"),
+        ("https://github.com/?a=1&b=2", "https://github.com/?a=1&amp;b=2"),
+    ],
+)
+def test_attribute_values_are_escaped(raw: str, escaped: str) -> None:
+    quoted = raw.replace("&", "&amp;").replace('"', "&quot;")
+    link = sanitize(f'<a href="{quoted}">x</a>')
+    assert link == f'<a href="{escaped}" {LINK}>x</a>'
+    image = sanitize(f'<img src="{quoted}" alt="pic">')
+    assert image == f'<a href="{escaped}" {LINK}>image: pic</a>'
+    for out in (link, image):
+        assert out.count('"') == 6
+
+
+def test_tags_left_open_at_the_end_are_closed() -> None:
+    assert sanitize("<p>unclosed <b>x") == "<p>unclosed <b>x</b></p>"
+    long = "<p>" + "a" * 500_000 + "</p>"
+    out = sanitize(long)
+    assert out.startswith("<p>")
+    assert out.endswith("</p>")
+
+
+def test_a_dropped_tag_nested_in_itself_stays_dropped() -> None:
+    assert "leak" not in sanitize("<template><template></template>leak</template>x")
+    assert sanitize("<template><template></template>leak</template>x") == "x"
+
+
+@pytest.mark.parametrize("start", ["²", "-1", "1e3", "99999999999999999999", " 3", "٣"])
+def test_list_starts_that_are_not_plain_numbers_are_dropped(start: str) -> None:
+    assert sanitize(f'<ol start="{start}"><li>x</li></ol>') == "<ol><li>x</li></ol>"
+
+
+def test_a_parser_failure_gives_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from custom_components.github_inbox import sanitize as module
+
+    def broken(self: object, data: str) -> None:
+        raise AssertionError("parser broke")
+
+    monkeypatch.setattr(module._Sanitiser, "feed", broken)
+    monkeypatch.setattr(module._Text, "feed", broken)
+    assert sanitize("<p>x</p>") == ""
+    assert preview("<p>x</p>") == ""

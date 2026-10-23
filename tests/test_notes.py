@@ -50,9 +50,33 @@ def test_one_entry_links_to_its_item() -> None:
     assert note["message"] == "ATX buttons fail\nSame here"
     assert note["link"] == "/github-inbox?item=heidrickla%2Fha-glkvm%232"
     assert note["markdown"].startswith(
-        "[ha-glkvm#2 ATX buttons fail](https://github.com/"
+        "[ha\\-glkvm\\#2 ATX buttons fail](https://github.com/"
     )
     assert notes.compose([entry()])["message"] == "ATX buttons fail"
+
+
+def test_markdown_carries_titles_and_previews_as_text() -> None:
+    hostile = "x](https://attacker.example) ![t](https://attacker.example/p.png)"
+    note = notes.compose(
+        [entry(title=hostile, preview="![p](https://attacker.example/q)")]
+    )
+    md = note["markdown"]
+    assert "](https://attacker.example" not in md
+    assert md.count("](") == 1
+    assert "\\!\\[p\\]\\(https://attacker\\.example/q\\)" in md
+    batch = notes.compose([entry(title=hostile), entry()])["markdown"]
+    assert "](https://attacker.example" not in batch
+    assert batch.count("](https://github.com/") == 2
+
+
+def test_only_github_addresses_become_links() -> None:
+    assert (
+        "](" not in notes.compose([entry(url="https://attacker.example/x")])["markdown"]
+    )
+    assert (
+        "](" not in notes.compose([entry(url="https://github.com/a) (b")])["markdown"]
+    )
+    assert "](" not in notes.compose([entry(url=None)])["markdown"]
 
 
 def test_a_batch_is_one_message_capped_at_six_lines() -> None:

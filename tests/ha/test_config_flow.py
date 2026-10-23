@@ -6,12 +6,14 @@ import html
 import json
 import re
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers.network import NoURLAvailableError
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_mock_service,
@@ -28,6 +30,7 @@ from custom_components.github_inbox.const import (
     CONF_CLOUDHOOK,
     CONF_INCLUDE_BOTS,
     CONF_INCLUDE_OWN,
+    CONF_ME,
     CONF_NOTIFY_ON,
     CONF_NOTIFY_TARGETS,
     CONF_ORGANIZATION,
@@ -35,6 +38,7 @@ from custom_components.github_inbox.const import (
     CONF_PRIVATE_KEY,
     CONF_ROUTE,
     CONF_WEBHOOK_ID,
+    CONF_WEBHOOK_SECRET,
     DOMAIN,
     NOTIFY_OPENED,
     ROUTE_CLOUD,
@@ -50,6 +54,7 @@ from tests.ha.conftest import (
     INSTALLATION_ID,
     WEBHOOK_ID,
     GitHub,
+    entry_data,
     setup_entry,
 )
 from tests.payloads import REPO
@@ -159,10 +164,14 @@ async def test_the_whole_setup(
     data = result["data"]
     assert data[CONF_APP_ID] == APP_ID
     assert data[CONF_PRIVATE_KEY] == pem
+    assert data[CONF_WEBHOOK_SECRET] == "new-secret"
+    assert data["app_slug"] == "ha-inbox-test"
+    assert data["app_url"] == APP_URL
     assert data[CONF_CLOUDHOOK] is True
     assert data["installation_id"] == INSTALLATION_ID
     assert data["account_id"] == ACCOUNT_ID
     assert result["options"][CONF_PERSISTENT] is True
+    assert result["options"][CONF_ME] == [ACCOUNT]
     assert result["result"].unique_id == str(ACCOUNT_ID)
     assert mock_route["hook"].await_args.args[1:] == (
         data[CONF_WEBHOOK_ID],
@@ -171,6 +180,59 @@ async def test_the_whole_setup(
     await hass.async_block_till_done(wait_background_tasks=True)
     mock_route["delete"].assert_not_called()
     assert views.pending(hass) == {}
+
+
+async def test_the_whole_setup_on_the_external_route(
+    hass: HomeAssistant,
+    hass_client_no_auth: Any,
+    github_ready: GitHub,
+    mock_route: dict[str, MagicMock],
+) -> None:
+    mock_route["ready"].return_value = False
+    mock_route["external"].return_value = "https://ha.example/api/webhook/x"
+    mock_route["hook"].return_value = "https://ha.example/api/webhook/x"
+    result = await start(hass, **{CONF_ROUTE: ROUTE_EXTERNAL})
+    client = await hass_client_no_auth()
+    result = await through_github(hass, client, result)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_CLOUDHOOK] is False
+    await hass.async_block_till_done(wait_background_tasks=True)
+    mock_route["delete"].assert_not_called()
+    mock_route["listen"].assert_not_called()
+
+
+async def test_github_returns_to_the_origin_the_browser_used(
+    hass: HomeAssistant, hass_client: Any
+) -> None:
+    # Views register before the client freezes the router.
+    for domain in ("config", "webhook", DOMAIN):
+        assert await async_setup_component(hass, domain, {})
+    client = await hass_client()
+    resp = await client.post(
+        "/api/config/config_entries/flow", json={"handler": DOMAIN}
+    )
+    flow = await resp.json()
+    resp = await client.post(
+        f"/api/config/config_entries/flow/{flow['flow_id']}",
+        json={CONF_APP_NAME: "HA Inbox test", CONF_ROUTE: ROUTE_CLOUD},
+    )
+    step = await resp.json()
+    base = client.make_url("/")
+    origin = f"{base.scheme}://{base.host}:{base.port}"
+    assert step["url"].startswith(f"{origin}{views.START_PATH}/")
+    hass.config_entries.flow.async_abort(flow["flow_id"])
+
+
+async def test_without_a_request_or_a_url_the_step_url_is_a_path(
+    hass: HomeAssistant,
+) -> None:
+    with patch(
+        "custom_components.github_inbox.config_flow.get_url",
+        side_effect=NoURLAvailableError,
+    ):
+        result = await start(hass)
+    assert result["url"].startswith(views.START_PATH + "/")
+    hass.config_entries.flow.async_abort(result["flow_id"])
 
 
 async def test_an_organization_app(
@@ -272,6 +334,13 @@ async def test_pages_answer_only_a_waiting_flow(
     ).status == 404
     assert (await client.get(f"{views.INSTALLED_PATH}?installation_id=1")).status == 404
     views.pending(hass)["stale"] = views.Pending("no-such-flow", views.STAGE_CREATE)
+    views.pending(hass)["waiting"] = views.Pending(
+        result["flow_id"], views.STAGE_INSTALL
+    )
+    for raw in ("%C2%B2", "-1", "1" * 40, ""):
+        resp = await client.get(f"{views.INSTALLED_PATH}?installation_id={raw}")
+        assert resp.status == 404
+    del views.pending(hass)["waiting"]
     assert (await client.get(f"{views.CREATED_PATH}?state=stale&code=x")).status == 404
     views.pending(hass)["stale2"] = views.Pending("no-such-flow", views.STAGE_INSTALL)
     assert (await client.get(f"{views.INSTALLED_PATH}?installation_id=1")).status == 404
@@ -481,7 +550,40 @@ async def test_reauth_with_a_refused_key_makes_a_new_app_on_the_same_webhook(
     await hass.async_block_till_done(wait_background_tasks=True)
     assert loaded.data[CONF_APP_ID] == NEW_APP_ID
     assert loaded.data[CONF_WEBHOOK_ID] == WEBHOOK_ID
+    assert loaded.data[CONF_WEBHOOK_SECRET] == "new-secret"
     mock_route["delete"].assert_not_called()
+
+
+async def test_reauth_onto_the_external_route_drops_the_cloudhook(
+    hass: HomeAssistant,
+    loaded: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    hass_client_no_auth: Any,
+    mock_route: dict[str, MagicMock],
+    pem: str,
+) -> None:
+    aioclient_mock.get(f"{API}/app", status=401, json={})
+    aioclient_mock.post(
+        f"{API}/app-manifests/{CODE}/conversions",
+        status=201,
+        json=creds(pem, NEW_APP_ID),
+    )
+    aioclient_mock.get(
+        f"{API}/app/installations/{INSTALLATION_ID}", json=installation()
+    )
+    mock_route["external"].return_value = "https://ha.example/api/webhook/x"
+    mock_route["hook"].return_value = "https://ha.example/api/webhook/x"
+    result = await reauth(hass, loaded)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_APP_NAME: "HA Inbox again", CONF_ROUTE: ROUTE_EXTERNAL},
+    )
+    client = await hass_client_no_auth()
+    result = await through_github(hass, client, result)
+    assert result["reason"] == "reauth_successful"
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert loaded.data[CONF_CLOUDHOOK] is False
+    mock_route["delete"].assert_awaited_once_with(hass, WEBHOOK_ID)
 
 
 # ----------------------------------------------------------- reconfigure
@@ -537,6 +639,57 @@ async def test_reconfigure_errors(
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == errors
     assert loaded.data[CONF_CLOUDHOOK] is True
+    mock_route["delete"].assert_not_called()
+
+
+@pytest.fixture
+async def loaded_external(
+    hass: HomeAssistant, pem: str, github: GitHub
+) -> MockConfigEntry:
+    github.token()
+    github.repos([REPO])
+    github.issues([])
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=ACCOUNT,
+        unique_id=str(ACCOUNT_ID),
+        data=entry_data(pem, **{CONF_CLOUDHOOK: False}),
+        options={},
+    )
+    await setup_entry(hass, entry)
+    return entry
+
+
+async def test_reconfigure_moves_the_webhook_onto_the_cloud(
+    hass: HomeAssistant,
+    loaded_external: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    mock_route: dict[str, MagicMock],
+) -> None:
+    aioclient_mock.patch(f"{API}/app/hook/config", status=204)
+    result = await loaded_external.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ROUTE: ROUTE_CLOUD}
+    )
+    assert result["reason"] == "reconfigure_successful"
+    assert loaded_external.data[CONF_CLOUDHOOK] is True
+    mock_route["delete"].assert_not_called()
+
+
+async def test_a_cloudhook_github_was_not_told_about_is_dropped(
+    hass: HomeAssistant,
+    loaded_external: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+    mock_route: dict[str, MagicMock],
+) -> None:
+    aioclient_mock.patch(f"{API}/app/hook/config", status=500, json={})
+    result = await loaded_external.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ROUTE: ROUTE_CLOUD}
+    )
+    assert result["errors"] == {"base": "cannot_connect"}
+    assert loaded_external.data[CONF_CLOUDHOOK] is False
+    mock_route["delete"].assert_awaited_once_with(hass, WEBHOOK_ID)
 
 
 # --------------------------------------------------------------- options
@@ -554,7 +707,12 @@ async def test_options_reach_the_running_inbox(
         v for k, v in result["data_schema"].schema.items() if k == CONF_NOTIFY_TARGETS
     )
     assert selector.config["options"] == ["mobile_app_phone"]
+    me = next(v for k, v in result["data_schema"].schema.items() if k == CONF_ME)
+    assert me.config["multiple"] is True
+    defaults = {str(k): k.default() for k in result["data_schema"].schema}
+    assert defaults[CONF_ME] == [ACCOUNT]
     new = {
+        CONF_ME: ["HeidrickLA", " ", "Partner"],
         CONF_NOTIFY_TARGETS: ["mobile_app_phone"],
         CONF_PERSISTENT: False,
         CONF_NOTIFY_ON: [NOTIFY_OPENED],
@@ -566,4 +724,25 @@ async def test_options_reach_the_running_inbox(
     await hass.async_block_till_done(wait_background_tasks=True)
     running = loaded.runtime_data
     assert running is not before
-    assert dict(running.config_entry.options) == new
+    assert dict(running.config_entry.options) == {
+        **new,
+        CONF_ME: ["heidrickla", "partner"],
+    }
+    assert running.me == {"heidrickla", "partner"}
+
+
+async def test_blank_logins_mean_the_account(
+    hass: HomeAssistant, loaded: MockConfigEntry
+) -> None:
+    result = await hass.config_entries.options.async_init(loaded.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_ME: [],
+            CONF_PERSISTENT: False,
+            CONF_NOTIFY_ON: [NOTIFY_OPENED],
+            CONF_INCLUDE_BOTS: False,
+            CONF_INCLUDE_OWN: False,
+        },
+    )
+    assert loaded.options[CONF_ME] == [ACCOUNT]

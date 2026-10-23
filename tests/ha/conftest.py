@@ -144,8 +144,17 @@ class GitHub:
             json={"token": "ghs_test", "expires_at": "2099-01-01T00:00:00Z"},
         )
 
-    def repos(self, names: Iterable[str] = (REPO,), status: int = 200) -> None:
-        rows = [{"full_name": n, "archived": False} for n in names]
+    def repos(
+        self,
+        names: Iterable[str] = (REPO,),
+        status: int = 200,
+        archived: Iterable[str] = (),
+    ) -> None:
+        rows: list[dict[str, Any]] = [
+            {"full_name": n, "archived": False} for n in names
+        ]
+        rows += [{"full_name": n, "archived": True} for n in archived]
+        rows.append({"archived": False})
         self.m.get(
             f"{API}/installation/repositories",
             status=status,

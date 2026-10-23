@@ -164,6 +164,11 @@ function glyph(item) {
   if (item.kind === "pr") return item.draft ? G.pr(cv("--faint"), true) : G.pr(cv("--s2"));
   return G.issue(cv("--s1"));
 }
+// Whether a login is one of yours for an item's account; GitHub logins are case-insensitive.
+function isMe(i) {
+  const me = (i.me && i.me.length ? i.me : [i.account || ""]).map((l) => String(l).toLowerCase());
+  return (login) => me.includes(String(login || "").toLowerCase());
+}
 function avatar(login, bot, me) {
   const name = String(login || "?").replace(/\[bot\]$/, "");
   const ini = name.split(/[-_ .]/).filter(Boolean).slice(0, 2).map((p) => p[0]).join("").toUpperCase() || "?";
@@ -570,35 +575,35 @@ ${total ? `<span class="tot" style="bottom:calc(${h(total)} + 3px)">${total}</sp
 
   _itemHtml(i) {
     const open = this._open.has(i.key);
-    const account = i.account;
+    const mine = isMe(i);
     const pr = i.pr
       ? `<span data-tip="${esc(`${i.pr.head} into ${i.pr.base}\n${i.pr.changed_files} files changed`)}">+${i.pr.additions} −${i.pr.deletions}</span>`
       : "";
     const draft = i.draft ? `<span class="chip">draft</span>` : "";
     const fresh = i.unseen ? `<span class="chip new"><span class="dot" style="background:var(--warn)"></span>new</span>` : "";
     const last = i.last
-      ? `<span>${avatar(i.last.author, false, i.last.author === account)} ${esc(i.last.kind === "review" ? (REVIEW[i.last.state] || ["reviewed"])[0] : "commented")} ${esc(ago(i.last.at))}</span>`
+      ? `<span>${avatar(i.last.author, false, mine(i.last.author))} ${esc(i.last.kind === "review" ? (REVIEW[i.last.state] || ["reviewed"])[0] : "commented")} ${esc(ago(i.last.at))}</span>`
       : "";
     return `<div class="item${open ? " open" : ""}" data-key="${esc(i.key)}">
 <div class="row" data-act="toggle" data-key="${esc(i.key)}" tabindex="0" role="button" aria-expanded="${open}">
 <span class="caret">${G.caret()}</span><span class="gl" data-tip="${i.kind === "pr" ? (i.draft ? "draft pull request" : "pull request") : "issue"}">${glyph(i)}</span>
 <div class="main"><div class="title">${esc(i.title)} <span class="num">#${i.number}</span></div>
-<div class="meta"><span>${esc(short(i.repo))}</span><span>${avatar(i.author, i.author_bot, i.author === account)} ${esc(i.author)} opened ${esc(ago(i.created_at))}</span>${last}${draft}</div>
+<div class="meta"><span>${esc(short(i.repo))}</span><span>${avatar(i.author, i.author_bot, mine(i.author))} ${esc(i.author)} opened ${esc(ago(i.created_at))}</span>${last}${draft}</div>
 ${i.labels && i.labels.length ? `<div class="labels">${labelChips(i.labels)}</div>` : ""}</div>
 <div class="side">${fresh}${pr}<span class="cm" data-tip="${i.comments} comments and reviews">${G.comment("var(--muted)")}${i.comments}</span></div></div>
-${open ? `<div class="detail">${this._detailHtml(i, account)}</div>` : ""}</div>`;
+${open ? `<div class="detail">${this._detailHtml(i, mine)}</div>` : ""}</div>`;
   }
 
-  _detailHtml(i, account) {
+  _detailHtml(i, mine) {
     const d = this._details.get(i.key);
     if (!d) return `<div class="ldg">${this._loading.has(i.key) ? "Loading" : "Not loaded"}</div>`;
     const seenAt = d.seen_at || "";
-    const desc = `<div class="box desc"><div class="ehead">${avatar(d.author, d.author_bot, d.author === account)}<span class="who">${esc(d.author)}</span><span class="what">opened this ${i.kind === "pr" ? "pull request" : "issue"}</span><span class="when" data-tip="${esc(when(d.created_at))}">${esc(ago(d.created_at))}</span></div>
+    const desc = `<div class="box desc"><div class="ehead">${avatar(d.author, d.author_bot, mine(d.author))}<span class="who">${esc(d.author)}</span><span class="what">opened this ${i.kind === "pr" ? "pull request" : "issue"}</span><span class="when" data-tip="${esc(when(d.created_at))}">${esc(ago(d.created_at))}</span></div>
 <div class="ebody md">${d.body_html || `<p class="muted">No description.</p>`}</div></div>`;
     const entries = (d.timeline || [])
       .map((e) => {
         const isOpen = this._openEntries.has(e.id);
-        const isNew = e.at > seenAt && e.author !== account;
+        const isNew = e.at > seenAt && !mine(e.author);
         let what = "commented";
         let mark = G.comment("var(--muted)");
         if (e.kind === "review") {
@@ -610,7 +615,7 @@ ${open ? `<div class="detail">${this._detailHtml(i, account)}</div>` : ""}</div>
           mark = G.review("var(--muted)");
         }
         return `<div class="box entry${isOpen ? " open" : ""}" data-id="${esc(e.id)}">
-<div class="ehead" data-act="entry" data-key="${esc(i.key)}" data-id="${esc(e.id)}" tabindex="0" role="button" aria-expanded="${isOpen}">${mark}${avatar(e.author, e.author_bot, e.author === account)}<span class="who">${esc(e.author)}</span><span class="what">${e.kind === "review_comment" ? what : esc(what)}</span>
+<div class="ehead" data-act="entry" data-key="${esc(i.key)}" data-id="${esc(e.id)}" tabindex="0" role="button" aria-expanded="${isOpen}">${mark}${avatar(e.author, e.author_bot, mine(e.author))}<span class="who">${esc(e.author)}</span><span class="what">${e.kind === "review_comment" ? what : esc(what)}</span>
 ${isNew ? `<span class="chip new"><span class="dot" style="background:var(--warn)"></span>new</span>` : ""}<span class="pv">${esc(e.preview)}</span><span class="when" data-tip="${esc(when(e.at))}">${esc(ago(e.at))}</span></div>
 <div class="ebody md">${e.body_html || `<p class="muted">No text.</p>`}${e.url ? `<p class="small"><a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">Open this on GitHub</a></p>` : ""}</div></div>`;
       })

@@ -56,8 +56,9 @@
   "options": {
     "step": {
       "init": {
-        "title": "Notifications",
+        "title": "Inbox options",
         "data": {
+          "me": "Your GitHub logins",
           "notify_targets": "Notify services",
           "persistent_notification": "Home Assistant notification",
           "notify_on": "Notify on",
@@ -65,10 +66,11 @@
           "include_own": "Include my own activity"
         },
         "data_description": {
+          "me": "Activity by these logins counts as yours: it is never unseen, it ends waiting, and it notifies only with Include my own activity. For an organization's inbox, enter your own login.",
           "notify_targets": "For example the companion app's mobile_app service. A tap opens the inbox at the item.",
           "persistent_notification": "Also post to Home Assistant's notification list.",
           "include_bots": "Dependabot, Renovate and other bot accounts.",
-          "include_own": "Activity by the account that owns the inbox."
+          "include_own": "Activity by your GitHub logins."
         }
       }
     }

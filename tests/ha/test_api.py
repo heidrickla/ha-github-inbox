@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -23,8 +24,10 @@ from custom_components.github_inbox.api import (
     GitHubAuthError,
     GitHubConnectionError,
     GitHubError,
+    GitHubForbiddenError,
     GitHubNotFoundError,
     InstallationClient,
+    Listing,
 )
 from tests.ha.conftest import API, APP_ID, INSTALLATION_ID
 from tests.payloads import REPO
@@ -121,7 +124,9 @@ async def test_a_revoked_token_is_replaced_once(
         )
 
     aioclient_mock.get(f"{API}/installation/repositories", side_effect=repos)
-    assert await client(session, pem).repositories() == [{"full_name": REPO}]
+    assert await client(session, pem).repositories() == Listing(
+        [{"full_name": REPO}], complete=True
+    )
     assert (
         sum(1 for c in aioclient_mock.mock_calls if c[1].path.endswith("access_tokens"))
         == 2
@@ -156,8 +161,9 @@ async def test_pages_follow_the_link_header_on_the_api_host_only(
         json=[{"number": 1}, "junk"],
         headers={"Link": f'<{url}?page=1>; rel="prev", <{url}?page=2>; rel="next"'},
     )
-    rows = await client(session, pem).open_issues(REPO)
-    assert [r["number"] for r in rows] == [1, 2]
+    listing = await client(session, pem).open_issues(REPO)
+    assert [r["number"] for r in listing.rows] == [1, 2]
+    assert listing.complete
     first = aioclient_mock.mock_calls[1]
     assert first[1].query["state"] == "open"
     assert first[1].query["per_page"] == "100"
@@ -174,6 +180,23 @@ async def test_pages_stop_at_the_cap(
     )
     rows = await client(session, pem).issue_comments(REPO, 1)
     assert len(rows) == api.MAX_PAGES
+    aioclient_mock.get(
+        f"{API}/installation/repositories",
+        json={"repositories": [{"full_name": REPO}]},
+        headers={"Link": f'<{API}/installation/repositories?page=2>; rel="next"'},
+    )
+    listing = await client(session, pem).repositories()
+    assert len(listing.rows) == api.MAX_PAGES
+    assert not listing.complete
+
+
+async def test_a_list_answer_without_its_key_is_an_error(
+    session: aiohttp.ClientSession, aioclient_mock: AiohttpClientMocker, pem: str
+) -> None:
+    mint(aioclient_mock)
+    aioclient_mock.get(f"{API}/installation/repositories", json={"total_count": 0})
+    with pytest.raises(GitHubConnectionError, match="has no repositories"):
+        await client(session, pem).repositories()
 
 
 async def test_a_list_answer_that_is_not_a_list_is_an_error(
@@ -185,6 +208,18 @@ async def test_a_list_answer_that_is_not_a_list_is_an_error(
         await client(session, pem).reviews(REPO, 1)
 
 
+async def test_a_secondary_rate_limit_is_named_in_the_message(
+    session: aiohttp.ClientSession, aioclient_mock: AiohttpClientMocker, pem: str
+) -> None:
+    aioclient_mock.get(
+        f"{API}/app",
+        status=403,
+        json={"message": "You have exceeded a secondary rate limit."},
+    )
+    with pytest.raises(GitHubConnectionError, match="rate limited"):
+        await GitHubApp(session, APP_ID, pem).get_app()
+
+
 @pytest.mark.parametrize(
     ("status", "headers", "error"),
     [
@@ -192,7 +227,7 @@ async def test_a_list_answer_that_is_not_a_list_is_an_error(
         (403, {"x-ratelimit-remaining": "0"}, GitHubConnectionError),
         (403, {"retry-after": "60"}, GitHubConnectionError),
         (429, {}, GitHubConnectionError),
-        (403, {}, GitHubNotFoundError),
+        (403, {}, GitHubForbiddenError),
         (404, {}, GitHubNotFoundError),
         (410, {}, GitHubNotFoundError),
         (500, {}, GitHubConnectionError),
@@ -241,9 +276,34 @@ async def test_token_errors(
     with pytest.raises(GitHubAuthError):
         await client(session, pem).token()
     aioclient_mock.clear_requests()
+    aioclient_mock.post(
+        TOKEN_PATH, status=403, json={"message": "This installation has been suspended"}
+    )
+    with pytest.raises(GitHubAuthError):
+        await client(session, pem).token()
+    aioclient_mock.clear_requests()
     aioclient_mock.post(TOKEN_PATH, status=201, json={"nothing": True})
     with pytest.raises(GitHubConnectionError):
         await client(session, pem).token()
+
+
+async def test_an_unreadable_expiry_mints_a_token_per_call(
+    session: aiohttp.ClientSession, aioclient_mock: AiohttpClientMocker, pem: str
+) -> None:
+    mint(aioclient_mock, expires="garbage")
+    c = client(session, pem)
+    assert await c.token() == "ghs_a"
+    assert await c.token() == "ghs_a"
+    assert aioclient_mock.call_count == 2
+
+
+async def test_concurrent_reads_mint_one_token(
+    session: aiohttp.ClientSession, aioclient_mock: AiohttpClientMocker, pem: str
+) -> None:
+    mint(aioclient_mock)
+    c = client(session, pem)
+    assert await asyncio.gather(*(c.token() for _ in range(6))) == ["ghs_a"] * 6
+    assert aioclient_mock.call_count == 1
 
 
 async def test_app_calls(
@@ -275,10 +335,11 @@ async def test_reads_use_the_repository_paths(
     assert await c.review_comments(REPO, 4) == [{"id": 9}]
 
 
-@pytest.mark.parametrize("bad", ["../x", "a/b/c", "a", "a/..", "a b/c"])
+@pytest.mark.parametrize("bad", ["../x", "a/b/c", "a", "a/..", "./b", "a b/c"])
 def test_repository_names_are_checked(bad: str) -> None:
-    with pytest.raises(GitHubError):
+    with pytest.raises(GitHubNotFoundError):
         api.repo_path(bad)
+    assert api.repo_path("a/b..c") == "/repos/a/b..c"
 
 
 def test_next_link() -> None:

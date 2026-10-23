@@ -21,7 +21,7 @@ The integration creates a private GitHub App for your account from inside the co
 | An open item | The description, then the timeline: every comment, review and line comment as one line (author, verb or review state, preview, time) that expands on click. Expand all, Collapse all, Open on GitHub. Opening an item marks it seen. |
 | Recent activity | The newest 25 events across all repositories. |
 
-An item is unseen when someone other than you has written on it since you last opened it. It is waiting on you when the last comment or review is someone else's.
+An item is unseen when someone other than you has written on it since you last opened it. It is waiting on you when the last comment or review is someone else's. You are the logins in the Your GitHub logins option.
 
 Bodies are GitHub's own rendering, sanitised: links open on GitHub, images and videos become links, and scripts, styles and frames are dropped.
 
@@ -41,7 +41,7 @@ The entities are unavailable after a failed sync and while GitHub reports the ap
 
 ### Notifications
 
-New activity goes to the notify services you choose and, optionally, to a persistent notification. Events within 5 seconds of each other become one message ("3 updates in your repositories"). On the Home Assistant Companion app a notification opens the item in the panel and carries an Open on GitHub action. Your own activity and bots' are left out unless you turn them on.
+New activity goes to the notify services you choose and, optionally, to a persistent notification. Events within 5 seconds of each other become one message ("3 updates in your repositories"). Each message is its own card in Home Assistant's notification list. On the Home Assistant Companion app a notification opens the item in the panel and carries an Open on GitHub action. Your own activity and bots' are left out unless you turn them on.
 
 ### Actions
 
@@ -87,7 +87,8 @@ Settings, Devices & services, GitHub Inbox, Configure:
 | Home Assistant notification | on | Also post to Home Assistant's notification list. |
 | Notify on | new and reopened items, comments, reviews | Which events notify. Closed and merged is the fourth choice. |
 | Include bots | off | Notify for activity by bots such as Dependabot. |
-| Include my own activity | off | Notify for your own activity. |
+| Include my own activity | off | Notify for activity by your GitHub logins. |
+| Your GitHub logins | the account | The logins counted as you for own activity, unseen and waiting. For an organization's inbox, add your personal login. |
 
 Saving reloads the inbox with the new options.
 
@@ -108,7 +109,9 @@ Home Assistant asks for re-authentication when GitHub stops accepting the app's 
 
 GitHub delivers each change to the webhook as it happens. Each delivery is checked against the app's webhook secret before it is read, and applied at once; a few seconds later the item is read from GitHub for its rendered text and full timeline.
 
-A full sync runs at setup, on the resync action and the panel's Sync now, after Home Assistant Cloud reconnects, and when repositories are added to the installation or renamed. It reads only the items that changed since the stored copy, and notifies once for anything it found that no webhook delivered. A failed sync retries after 5, 15 and then 60 minutes.
+A full sync runs at setup, on the resync action and the panel's Sync now, after Home Assistant Cloud reconnects, and when repositories are added to the installation or renamed. It reads only the items that changed since the stored copy, and notifies once for anything it found that no webhook delivered. A repository GitHub refuses to list, or a listing cut short, keeps its stored items until a later sync reads it in full. A failed sync retries after 5, 15 and then 60 minutes.
+
+Activity on a closed issue or a merged pull request does not return it to the list. A renamed repository keeps its items, seen marks and activity under the new name.
 
 ## Examples
 

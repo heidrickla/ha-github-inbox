@@ -46,7 +46,19 @@ class GitHubAuthError(GitHubError):
 
 
 class GitHubNotFoundError(GitHubError):
-    """The resource is gone or this installation cannot read it."""
+    """The resource is gone: deleted, disabled or blocked for legal reasons."""
+
+
+class GitHubForbiddenError(GitHubError):
+    """GitHub refused the read (a permission, a block or an IP allow list); the resource may still exist."""
+
+
+@dataclass(frozen=True, slots=True)
+class Listing:
+    """The rows of a paginated list, and whether every page was read."""
+
+    rows: list[dict[str, Any]]
+    complete: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,8 +87,8 @@ def _headers(token: str | None, accept: str = ACCEPT_JSON) -> dict[str, str]:
 
 def repo_path(repo: str) -> str:
     """`/repos/<owner>/<name>` for a full name, refusing anything else."""
-    if not _REPO_RE.match(repo) or ".." in repo:
-        raise GitHubError(f"not a repository name: {repo!r}")
+    if not _REPO_RE.match(repo) or {".", ".."} & set(repo.split("/")):
+        raise GitHubNotFoundError(f"not a repository name: {repo!r}")
     return f"/repos/{repo}"
 
 
@@ -89,17 +101,22 @@ def next_link(header: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _raise_for(resp: aiohttp.ClientResponse, path: str) -> None:
+async def _raise_for(resp: aiohttp.ClientResponse, path: str) -> None:
     status = resp.status
     if status == 401:
         raise GitHubAuthError(f"{path}: HTTP 401")
-    if status in (403, 429) and (
-        resp.headers.get("x-ratelimit-remaining") == "0"
-        or "retry-after" in resp.headers
-        or status == 429
-    ):
-        raise GitHubConnectionError(f"{path}: rate limited")
-    if status in (403, 404, 410, 451):
+    if status in (403, 429):
+        # A secondary rate limit can answer 403 with neither header; its message names it.
+        message = (await resp.text(errors="replace"))[:2000].lower()
+        if (
+            status == 429
+            or resp.headers.get("x-ratelimit-remaining") == "0"
+            or "retry-after" in resp.headers
+            or "rate limit" in message
+        ):
+            raise GitHubConnectionError(f"{path}: rate limited")
+        raise GitHubForbiddenError(f"{path}: HTTP 403")
+    if status in (404, 410, 451):
         raise GitHubNotFoundError(f"{path}: HTTP {status}")
     if status >= 500:
         raise GitHubConnectionError(f"{path}: HTTP {status}")
@@ -128,7 +145,7 @@ async def _send(
             timeout=TIMEOUT,
         ) as resp:
             if resp.status >= 400:
-                _raise_for(resp, shown)
+                await _raise_for(resp, shown)
             if resp.status == 204:
                 return None, None
             data = await resp.json(content_type=None)
@@ -230,7 +247,8 @@ class GitHubApp:
             data = await self._call(
                 "POST", f"/app/installations/{int(installation_id)}/access_tokens"
             )
-        except GitHubNotFoundError as err:
+        except (GitHubNotFoundError, GitHubForbiddenError) as err:
+            # 404 is an installation that is gone, 403 one that is suspended.
             raise GitHubAuthError(str(err)) from err
         try:
             return str(data["token"]), _parse_time(data["expires_at"])
@@ -278,15 +296,15 @@ class InstallationClient:
         data, _ = await self._get(path, None, ACCEPT_FULL if html else ACCEPT_JSON)
         return data
 
-    async def get_all(
+    async def listing(
         self,
         path: str,
         *,
         params: dict[str, str] | None = None,
         html: bool = False,
         key: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Every page of a list, up to MAX_PAGES of 100."""
+    ) -> Listing:
+        """Every page of a list, up to MAX_PAGES of 100, and whether that was all of it."""
         accept = ACCEPT_FULL if html else ACCEPT_JSON
         out: list[dict[str, Any]] = []
         url: str | None = path
@@ -297,18 +315,27 @@ class InstallationClient:
             data, url = await self._get(url, query, accept)
             # The next link carries the query itself.
             query = None
-            rows = data.get(key, []) if key and isinstance(data, dict) else data
-            if not isinstance(rows, list):
+            if key is not None:
+                if not isinstance(data, dict) or key not in data:
+                    raise GitHubConnectionError(f"{path}: the answer has no {key}")
+                data = data[key]
+            if not isinstance(data, list):
                 raise GitHubConnectionError(f"{path}: the answer is not a list")
-            out.extend(row for row in rows if isinstance(row, dict))
-        return out
+            out.extend(row for row in data if isinstance(row, dict))
+        return Listing(out, complete=url is None)
 
-    async def repositories(self) -> list[dict[str, Any]]:
-        return await self.get_all("/installation/repositories", key="repositories")
+    async def get_all(
+        self, path: str, *, html: bool = False, key: str | None = None
+    ) -> list[dict[str, Any]]:
+        """The rows of a list, up to MAX_PAGES of 100."""
+        return (await self.listing(path, html=html, key=key)).rows
 
-    async def open_issues(self, repo: str) -> list[dict[str, Any]]:
+    async def repositories(self) -> Listing:
+        return await self.listing("/installation/repositories", key="repositories")
+
+    async def open_issues(self, repo: str) -> Listing:
         """Open issues and pull requests; GitHub lists both as issues."""
-        return await self.get_all(
+        return await self.listing(
             f"{repo_path(repo)}/issues", params={"state": "open"}, html=True
         )
 

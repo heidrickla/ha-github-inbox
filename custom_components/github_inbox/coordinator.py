@@ -26,8 +26,10 @@ from . import model, notes
 from .api import (
     GitHubAuthError,
     GitHubError,
+    GitHubForbiddenError,
     GitHubNotFoundError,
     InstallationClient,
+    Listing,
 )
 from .const import (
     ACTIVITY_CLOSED,
@@ -44,6 +46,7 @@ from .const import (
     CONF_INCLUDE_BOTS,
     CONF_INCLUDE_OWN,
     CONF_INSTALLATION_ID,
+    CONF_ME,
     CONF_NOTIFY_ON,
     CONF_NOTIFY_TARGETS,
     CONF_PERSISTENT,
@@ -66,6 +69,8 @@ REMOVED_REPO_ACTIONS = ("deleted", "archived", "transferred")
 RESYNC_REPO_ACTIONS = ("renamed", "unarchived", "created")
 # Stored bookkeeping the panel does not need.
 INTERNAL = ("body_sig", "body_rendered", "synced")
+# Seconds a notify call may take before the next target is tried.
+NOTIFY_TIMEOUT = 30
 
 type InboxConfigEntry = ConfigEntry[InboxCoordinator]
 
@@ -91,10 +96,14 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.client = client
         self.store = store
-        self.owner = str(entry.data[CONF_ACCOUNT])
+        self.account = str(entry.data[CONF_ACCOUNT])
+        # You on GitHub: the account itself, or the people named for an organization's inbox.
+        self.me = model.logins(entry.options.get(CONF_ME) or [self.account])
         self.sync_state = "pending"
         self.sync_error: str | None = None
         self.installation_lost = False
+        self._closed = False
+        self._refresh_warned = False
         self.data = self._counts()
         self._gen: dict[str, int] = {}
         self._refresh_cancel: dict[str, CALLBACK_TYPE] = {}
@@ -123,20 +132,31 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return items
 
     def _counts(self) -> dict[str, Any]:
+        last_delivery = self.store.data["last_delivery"]
+        if self.store.data["last_sync"] is None:
+            # Nothing has been read from GitHub yet: the counts are unknown, not zero.
+            return {
+                "issues": None,
+                "prs": None,
+                "drafts": None,
+                "unseen": None,
+                "last_delivery": last_delivery,
+            }
         items = self.items.values()
         seen = self.store.data["seen"]
         return {
             "issues": sum(1 for i in items if i["kind"] == "issue"),
             "prs": sum(1 for i in items if i["kind"] == "pr"),
             "drafts": sum(1 for i in items if i["kind"] == "pr" and i["draft"]),
-            "unseen": sum(1 for i in items if model.unseen(i, seen, self.owner)),
-            "last_delivery": self.store.data["last_delivery"],
+            "unseen": sum(1 for i in items if model.unseen(i, seen, self.me)),
+            "last_delivery": last_delivery,
         }
 
     def account_view(self) -> dict[str, Any]:
         """This account's state for the panel snapshot."""
         return {
-            "account": self.owner,
+            "account": self.account,
+            "me": self.me,
             "items": self.items,
             "seen": self.store.data["seen"],
             "activity": self.store.data["activity"],
@@ -157,7 +177,9 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.data = self._counts()
         self.async_update_listeners()
         async_dispatcher_send(self.hass, SIGNAL_UPDATED)
-        self.store.async_save()
+        if not self._closed:
+            # After unload the store has been flushed; a late refresh must not schedule another write.
+            self.store.async_save()
 
     @callback
     def async_add_activity_listener(
@@ -178,7 +200,7 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         seen: dict[str, str] = self.store.data["seen"]
         for key in self.items if keys is None else keys:
             if key in self.items:
-                seen[key] = max(now, model.activity_at(self.items[key], self.owner))
+                seen[key] = max(now, model.activity_at(self.items[key], self.me))
         self._publish()
 
     # -------------------------------------------------------------- sync
@@ -193,15 +215,12 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             await self._sync()
         except GitHubAuthError as err:
-            self.sync_state = "failed"
-            self.sync_error = str(err)
+            self._failed(err)
             raise ConfigEntryAuthFailed(
                 translation_domain=DOMAIN, translation_key="auth_failed"
             ) from err
         except GitHubError as err:
-            self.sync_state = "failed"
-            self.sync_error = str(err)
-            async_dispatcher_send(self.hass, SIGNAL_UPDATED)
+            self._failed(err)
             self._schedule_sync(SYNC_RETRY[min(self._retry, len(SYNC_RETRY) - 1)])
             self._retry += 1
             raise UpdateFailed(
@@ -209,6 +228,9 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 translation_key="sync_failed",
                 translation_placeholders={"error": str(err)},
             ) from err
+        except Exception as err:
+            self._failed(err)
+            raise
         self._retry = 0
         self.sync_state = "ok"
         self.sync_error = None
@@ -216,33 +238,55 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._publish()
         return self._counts()
 
+    @callback
+    def _failed(self, err: Exception) -> None:
+        self.sync_state = "failed"
+        self.sync_error = str(err) or type(err).__name__
+        async_dispatcher_send(self.hass, SIGNAL_UPDATED)
+
     async def _sync(self) -> None:
         start_gen = dict(self._gen)
-        repos = await self.client.repositories()
+        live = self.items
+        installed = await self.client.repositories()
         names = sorted(
             str(r["full_name"])
-            for r in repos
+            for r in installed.rows
             if r.get("full_name") and not r.get("archived")
         )
+        # Repositories whose open items were not all read: their stored items stay.
+        partial: set[str] = set()
+        if not installed.complete:
+            listed = set(names)
+            partial |= {i["repo"] for i in live.values() if i["repo"] not in listed}
+            _LOGGER.warning(
+                "GitHub listed more than %s repositories for %s; items of the rest are kept as stored",
+                len(installed.rows),
+                self.account,
+            )
         gate = asyncio.Semaphore(CONCURRENCY)
 
-        async def listing(repo: str) -> list[dict[str, Any]]:
+        async def listing(repo: str) -> Listing | None:
             async with gate:
                 try:
                     return await self.client.open_issues(repo)
                 except GitHubNotFoundError:
-                    # Unreadable now (disabled, or access withdrawn): it has no items.
-                    return []
+                    # Gone, disabled or blocked: it has no items.
+                    return Listing([], complete=True)
+                except GitHubForbiddenError as err:
+                    # Refused: the items may still be open, so the stored copy stays.
+                    _LOGGER.warning("GitHub refused to list %s: %s", repo, err)
+                    return None
 
         lists = await asyncio.gather(*(listing(n) for n in names))
         fresh: dict[str, Item] = {}
         for repo, issues in zip(names, lists, strict=True):
-            for issue in issues:
+            if issues is None or not issues.complete:
+                partial.add(repo)
+            for issue in issues.rows if issues is not None else []:
                 if issue.get("number") is not None:
                     item = model.item_from_issue(repo, issue)
                     fresh[item["key"]] = item
 
-        live = self.items
         first = self.store.data["last_sync"] is None
         since = self.store.data["last_sync"] or ""
         changed = [
@@ -283,10 +327,12 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 result[key] = live[key]
         for key, item in live.items():
-            if key not in fresh and touched(key):
+            if key not in fresh and (touched(key) or item["repo"] in partial):
                 result[key] = item
         self.store.data["items"] = result
-        self.store.data["repos"] = names
+        seen: dict[str, str] = self.store.data["seen"]
+        self.store.data["seen"] = {k: v for k, v in seen.items() if k in result}
+        self.store.data["repos"] = sorted(set(names) | partial)
         self.store.data["last_sync"] = model.iso(dt_util.utcnow())
         for entry in missed:
             self._record(entry)
@@ -444,9 +490,19 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
         except GitHubNotFoundError:
             obj, item = {"state": "gone"}, {}
-        except GitHubError as err:
-            _LOGGER.debug("Kept the webhook copy of %s: %s", key, err)
+        except GitHubAuthError as err:
+            # The key or installation stopped working; the sync's failure starts re-authentication.
+            _LOGGER.warning("GitHub refused the app while reading %s: %s", key, err)
+            self.schedule_sync()
             return
+        except GitHubError as err:
+            if not self._refresh_warned:
+                _LOGGER.warning("Kept the webhook copy of %s: %s", key, err)
+                self._refresh_warned = True
+            return
+        if self._refresh_warned:
+            _LOGGER.info("Reading items from GitHub works again")
+            self._refresh_warned = False
         if self._gen.get(key, 0) != gen:
             # A newer event touched the item while this read ran.
             return
@@ -486,7 +542,7 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "url": item["url"],
             "actor": who,
             "bot": model.is_bot(actor),
-            "own": who == self.owner,
+            "own": model.is_me(who, self.me),
             "state": state,
             "preview": preview_text,
         }
@@ -509,12 +565,17 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _on_issues(self, p: dict[str, Any]) -> None:
         repo = str(p["repository"]["full_name"])
-        item = model.item_from_issue(repo, p["issue"])
+        issue = p["issue"]
+        item = model.item_from_issue(repo, issue)
         action = p.get("action")
         if action in ("closed", "deleted", "transferred"):
             self._remove(item["key"])
             if action == "closed":
                 self._activity(ACTIVITY_CLOSED, item, p.get("sender"))
+            return
+        if issue.get("state") != "open":
+            # A label, lock or edit on a closed issue keeps it out of the inbox.
+            self._remove(item["key"])
             return
         stored = self._upsert(item)
         if action in ("opened", "reopened"):
@@ -533,6 +594,9 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._remove(item["key"])
             kind = ACTIVITY_MERGED if pull.get("merged") else ACTIVITY_CLOSED
             self._activity(kind, item, p.get("sender"))
+            return
+        if pull.get("state") != "open":
+            self._remove(item["key"])
             return
         stored = self._upsert(item)
         if action in ("opened", "reopened"):
@@ -605,6 +669,28 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             model.upsert_entry(item, entry)
         self._schedule_item_refresh(repo, item["number"], "pr")
 
+    def _rename_repo(self, old: str, new: str) -> None:
+        """Move items, seen marks and activity to a renamed repository; the sync then reads their new URLs."""
+        seen: dict[str, str] = self.store.data["seen"]
+        for key in [k for k, i in self.items.items() if i["repo"] == old]:
+            item = self.items.pop(key)
+            self._touch(key)
+            item["repo"] = new
+            item["key"] = model.key_for(new, item["number"])
+            self.items[item["key"]] = item
+            self._touch(item["key"])
+            if key in seen:
+                seen[item["key"]] = seen.pop(key)
+            if cancel := self._refresh_cancel.pop(key, None):
+                cancel()
+        for entry in self.store.data["activity"]:
+            if entry.get("repo") == old:
+                entry["repo"] = new
+                entry["key"] = model.key_for(new, entry["number"])
+        repos: list[str] = self.store.data["repos"]
+        if old in repos:
+            repos[repos.index(old)] = new
+
     def _drop_repo(self, repo: str) -> None:
         for key in [k for k, i in self.items.items() if i["repo"] == repo]:
             self._remove(key)
@@ -620,6 +706,12 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         current = int(entry.data[CONF_INSTALLATION_ID])
         if action in ("deleted", "suspend"):
             if new_id in (0, current):
+                if not self.installation_lost:
+                    _LOGGER.warning(
+                        "GitHub reports the app %s for %s; the inbox is unavailable until it is installed again",
+                        "uninstalled" if action == "deleted" else "suspended",
+                        self.account,
+                    )
                 self.installation_lost = True
                 entry.async_start_reauth(self.hass)
             return
@@ -628,6 +720,8 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         account = installation.get("account") or {}
         if int(account.get("id") or 0) != int(entry.data[CONF_ACCOUNT_ID]):
             return
+        if self.installation_lost:
+            _LOGGER.info("GitHub reports the app installed again for %s", self.account)
         self.installation_lost = False
         for flow in self.hass.config_entries.flow.async_progress_by_handler(
             DOMAIN, match_context={"source": SOURCE_REAUTH, "entry_id": entry.entry_id}
@@ -666,7 +760,7 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 prefix = repo.rsplit("/", 1)[0]
                 if old_name.get("from"):
-                    self._drop_repo(f"{prefix}/{old_name['from']}")
+                    self._rename_repo(f"{prefix}/{old_name['from']}", repo)
             self.schedule_sync()
 
     # ----------------------------------------------------- notifications
@@ -710,10 +804,14 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         opts = self.config_entry.options
         for target in opts.get(CONF_NOTIFY_TARGETS, []):
             try:
-                await self.hass.services.async_call(
-                    "notify", target, notes.service_data(target, note), blocking=True
-                )
-            except (HomeAssistantError, ValueError) as err:
+                async with asyncio.timeout(NOTIFY_TIMEOUT):
+                    await self.hass.services.async_call(
+                        "notify",
+                        target,
+                        notes.service_data(target, note),
+                        blocking=True,
+                    )
+            except (HomeAssistantError, ValueError, TimeoutError) as err:
                 if target not in self._failed_targets:
                     _LOGGER.warning(
                         "Could not notify through notify.%s: %s", target, err
@@ -722,17 +820,20 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 self._failed_targets.discard(target)
         if opts.get(CONF_PERSISTENT):
+            # One card per item, or per batch, so a later batch does not replace an unread one.
+            which = batch[0]["key"] if len(batch) == 1 else model.iso(dt_util.utcnow())
             persistent_notification.async_create(
                 self.hass,
                 note["markdown"],
                 title=note["title"],
-                notification_id=f"{DOMAIN}_{self.config_entry.entry_id}",
+                notification_id=f"{DOMAIN}_{self.config_entry.entry_id}_{which}",
             )
 
     # ------------------------------------------------------------- close
 
     @override
     async def async_shutdown(self) -> None:
+        self._closed = True
         for cancel in self._refresh_cancel.values():
             cancel()
         self._refresh_cancel.clear()

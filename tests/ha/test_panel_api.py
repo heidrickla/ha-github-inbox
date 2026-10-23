@@ -23,6 +23,7 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
     get_diagnostics_for_config_entry,
 )
 
+from custom_components.github_inbox import model
 from custom_components.github_inbox.const import (
     DOMAIN,
     PANEL_URL,
@@ -130,6 +131,16 @@ async def test_mark_seen_by_key_and_all(
     assert hass.states.get("sensor.github_heidrickla_unseen").state == "0"
 
 
+async def test_marking_seen_holds_when_github_is_ahead_of_the_clock(
+    hass: HomeAssistant, inbox: InboxCoordinator
+) -> None:
+    ahead = (dt_util.utcnow() + dt.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    inbox.items[KEY]["timeline"][-1]["at"] = ahead
+    inbox.async_mark_seen([KEY])
+    assert inbox.store.data["seen"][KEY] == ahead
+    assert not model.unseen(inbox.items[KEY], inbox.store.data["seen"], inbox.me)
+
+
 async def test_resync_command(
     hass: HomeAssistant, inbox: InboxCoordinator, hass_ws_client: Any, github: GitHub
 ) -> None:
@@ -141,16 +152,20 @@ async def test_resync_command(
     assert github.calls("get", "/installation/repositories") == before + 1
 
 
-@pytest.mark.parametrize("command", ["subscribe", "resync", "mark_seen"])
+@pytest.mark.parametrize(
+    ("command", "extra"),
+    [("subscribe", {}), ("resync", {}), ("mark_seen", {}), ("item", {"key": KEY})],
+)
 async def test_commands_are_for_administrators(
     hass: HomeAssistant,
     inbox: InboxCoordinator,
     hass_ws_client: Any,
     hass_read_only_access_token: str,
     command: str,
+    extra: dict[str, Any],
 ) -> None:
     ws = await hass_ws_client(hass, hass_read_only_access_token)
-    await ws.send_json({"id": 1, "type": f"{DOMAIN}/{command}"})
+    await ws.send_json({"id": 1, "type": f"{DOMAIN}/{command}", **extra})
     reply = await ws.receive_json()
     assert reply["error"]["code"] == "unauthorized"
 
@@ -213,7 +228,17 @@ async def test_resync_action_with_nothing_loaded(
 async def test_diagnostics_redact_the_secrets(
     hass: HomeAssistant, inbox: InboxCoordinator, hass_client: Any, pem: str
 ) -> None:
+    hass.config_entries.async_update_entry(
+        inbox.config_entry,
+        options={
+            **inbox.config_entry.options,
+            "notify_targets": ["mobile_app_alex_phone"],
+        },
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
     diag = await get_diagnostics_for_config_entry(hass, hass_client, inbox.config_entry)
+    assert "mobile_app_alex_phone" not in str(diag)
+    assert diag["entry"]["options"]["notify_targets"] == "**REDACTED**"
     text = str(diag)
     assert pem not in text
     assert "webhook-secret-for-tests" not in text
@@ -255,7 +280,9 @@ async def test_last_delivery_sensor(
     coordinator: InboxCoordinator = inbox.config_entry.runtime_data
     assert hass.states.get(entity_id).state == "unknown"
     coordinator.async_receive("ping", "g", {})
-    assert hass.states.get(entity_id).state != "unknown"
+    stored = coordinator.store.data["last_delivery"]
+    state = hass.states.get(entity_id).state
+    assert dt_util.parse_datetime(state) == dt_util.parse_datetime(stored)
 
 
 # ------------------------------------------------------------------ store

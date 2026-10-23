@@ -28,7 +28,11 @@ SNAPSHOT_DELAY = 0.25
 
 
 def coordinators(hass: HomeAssistant) -> list[InboxCoordinator]:
-    return [e.runtime_data for e in hass.config_entries.async_loaded_entries(DOMAIN)]
+    out: list[InboxCoordinator] = []
+    for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+        coordinator: InboxCoordinator = entry.runtime_data
+        out.append(coordinator)
+    return out
 
 
 def build_snapshot(hass: HomeAssistant) -> dict[str, Any]:

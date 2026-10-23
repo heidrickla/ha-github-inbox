@@ -137,3 +137,11 @@ def review_comment(
         "pull_request_review_id": 8,
         "html_url": f"https://github.com/{REPO}/pull/5#discussion_r{cid}",
     }
+
+
+PULL_DETAIL = ("additions", "deletions", "changed_files", "comments", "review_comments")
+
+
+def short_pull(number: int, **kwargs: Any) -> dict[str, Any]:
+    """The pull request as review webhooks carry it: GitHub's short form, without counts."""
+    return {k: v for k, v in pull(number, **kwargs).items() if k not in PULL_DETAIL}

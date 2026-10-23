@@ -10,7 +10,7 @@ import logging
 from collections.abc import Callable
 
 from homeassistant.components import webhook
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.network import NoURLAvailableError
 
@@ -62,11 +62,13 @@ async def async_hook_url(hass: HomeAssistant, webhook_id: str, route: str) -> st
     if route == ROUTE_CLOUD:
         if not cloud_ready(hass):
             raise RouteUnavailableError(route)
+        from hass_nabucasa.exceptions import NabuCasaBaseError
         from homeassistant.components import cloud
 
         try:
             return await cloud.async_get_or_create_cloudhook(hass, webhook_id)
-        except HomeAssistantError as err:
+        except (HomeAssistantError, NabuCasaBaseError, TimeoutError, ValueError) as err:
+            # Nabu Casa's own errors, its timeout, and the connection dropping mid-call.
             raise RouteUnavailableError(route) from err
     url = external_url(hass, webhook_id)
     if url is None:
@@ -77,24 +79,25 @@ async def async_hook_url(hass: HomeAssistant, webhook_id: str, route: str) -> st
 async def async_delete_cloudhook(hass: HomeAssistant, webhook_id: str) -> None:
     if "cloud" not in hass.config.components:
         return
+    from hass_nabucasa.exceptions import NabuCasaBaseError
     from homeassistant.components import cloud
 
     try:
         await cloud.async_delete_cloudhook(hass, webhook_id)
-    except (HomeAssistantError, ValueError) as err:
+    except (HomeAssistantError, NabuCasaBaseError, TimeoutError, ValueError) as err:
         _LOGGER.debug("No cloudhook removed for this inbox: %s", err)
 
 
 def listen_cloud(
-    hass: HomeAssistant, on_connected: Callable[[], None]
+    hass: HomeAssistant, on_change: Callable[[bool], None]
 ) -> CALLBACK_TYPE | None:
-    """Call `on_connected` each time the cloud connection comes up."""
+    """Call `on_change(connected)` each time the cloud connection comes up or goes down."""
     if "cloud" not in hass.config.components:
         return None
     from homeassistant.components import cloud
 
+    @callback
     def changed(state: cloud.CloudConnectionState) -> None:
-        if state is cloud.CloudConnectionState.CLOUD_CONNECTED:
-            on_connected()
+        on_change(state is cloud.CloudConnectionState.CLOUD_CONNECTED)
 
     return cloud.async_listen_connection_change(hass, changed)

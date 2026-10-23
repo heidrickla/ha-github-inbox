@@ -28,9 +28,11 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
 )
 
-from . import route, views
+from . import model, route, views
 from .api import (
     AppCredentials,
     GitHubApp,
@@ -53,6 +55,7 @@ from .const import (
     CONF_INCLUDE_BOTS,
     CONF_INCLUDE_OWN,
     CONF_INSTALLATION_ID,
+    CONF_ME,
     CONF_NOTIFY_ON,
     CONF_NOTIFY_TARGETS,
     CONF_ORGANIZATION,
@@ -236,15 +239,20 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(str(data[CONF_ACCOUNT_ID]))
         if self.source == SOURCE_REAUTH:
             self._abort_if_unique_id_mismatch(reason="wrong_account")
-            return self.async_update_reload_and_abort(
-                self._get_reauth_entry(), data_updates=data
-            )
+            entry = self._get_reauth_entry()
+            if entry.data.get(CONF_CLOUDHOOK) and self._route != ROUTE_CLOUD:
+                # The new app delivers to the external URL; the old cloudhook has no owner left.
+                await route.async_delete_cloudhook(
+                    self.hass, entry.data[CONF_WEBHOOK_ID]
+                )
+            return self.async_update_reload_and_abort(entry, data_updates=data)
         self._abort_if_unique_id_configured()
         self._keep_hook = True
         return self.async_create_entry(
             title=str(data[CONF_ACCOUNT]),
             data=data,
             options={
+                CONF_ME: [str(data[CONF_ACCOUNT])],
                 CONF_NOTIFY_TARGETS: [],
                 CONF_PERSISTENT: True,
                 CONF_NOTIFY_ON: list(DEFAULT_NOTIFY_ON),
@@ -328,10 +336,17 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
                 await app.update_hook_url(url)
             except route.RouteUnavailableError:
                 errors[CONF_ROUTE] = "route_unavailable"
-            except GitHubAuthError:
-                errors["base"] = "invalid_auth"
-            except GitHubError:
-                errors["base"] = "cannot_connect"
+            except GitHubError as err:
+                errors["base"] = (
+                    "invalid_auth"
+                    if isinstance(err, GitHubAuthError)
+                    else "cannot_connect"
+                )
+                if chosen == ROUTE_CLOUD and not entry.data.get(CONF_CLOUDHOOK):
+                    # GitHub still delivers to the external URL; the cloudhook just made is not used.
+                    await route.async_delete_cloudhook(
+                        self.hass, entry.data[CONF_WEBHOOK_ID]
+                    )
             else:
                 if chosen != ROUTE_CLOUD and entry.data.get(CONF_CLOUDHOOK):
                     await route.async_delete_cloudhook(
@@ -397,20 +412,30 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class InboxOptionsFlow(OptionsFlowWithReload):
-    """Where and when notifications go."""
+    """Who you are on GitHub, and where and when notifications go."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
-            return self.async_create_entry(data=user_input)
+            me = sorted(model.logins(user_input.get(CONF_ME) or []))
+            return self.async_create_entry(
+                data={
+                    **user_input,
+                    CONF_ME: me or [self.config_entry.data[CONF_ACCOUNT]],
+                }
+            )
         current = self.config_entry.options
+        me = list(current.get(CONF_ME) or [self.config_entry.data[CONF_ACCOUNT]])
         chosen = list(current.get(CONF_NOTIFY_TARGETS, []))
         # `send_message` addresses notify entities and needs an entity id.
         services = set(self.hass.services.async_services_for_domain("notify"))
         targets = sorted((services - {"send_message"}) | set(chosen))
         schema = vol.Schema(
             {
+                vol.Required(CONF_ME, default=me): TextSelector(
+                    TextSelectorConfig(multiple=True)
+                ),
                 vol.Optional(CONF_NOTIFY_TARGETS, default=chosen): SelectSelector(
                     SelectSelectorConfig(
                         options=targets,

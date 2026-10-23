@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Set
 from typing import Any
 
 from .sanitize import preview, sanitize, text_html
@@ -54,6 +54,15 @@ def parse(value: Any) -> dt.datetime | None:
 
 def login(user: Any) -> str:
     return str(user.get("login") or "") if isinstance(user, Mapping) else ""
+
+
+def logins(values: Iterable[Any]) -> frozenset[str]:
+    """Logins as compared: GitHub logins are case-insensitive."""
+    return frozenset(str(v).strip().lower() for v in values if str(v).strip())
+
+
+def is_me(who: str, me: Set[str]) -> bool:
+    return who.lower() in me
 
 
 def is_bot(user: Any) -> bool:
@@ -131,7 +140,11 @@ def item_from_issue(repo: str, issue: Mapping[str, Any]) -> Item:
 
 
 def item_from_pull(repo: str, pull: Mapping[str, Any]) -> Item:
+    """An item from a pull request. Review webhooks carry a short form without counts; merge keeps the stored ones."""
     item = _base(repo, pull, "pr")
+    if "additions" not in pull:
+        del item["comments"]
+        return item
     item["comments"] = int(pull.get("comments") or 0) + int(
         pull.get("review_comments") or 0
     )
@@ -150,7 +163,7 @@ def item_from_pull(repo: str, pull: Mapping[str, Any]) -> Item:
 def merge(old: Item | None, new: Item) -> Item:
     """The new summary over the stored item, keeping what the summary cannot carry."""
     if old is None:
-        return {**new, "timeline": [], "rev": 1}
+        return {"comments": 0, **new, "timeline": [], "rev": 1}
     merged = {**old, **new}
     if _keeps_rendering(old, new):
         merged["body_html"] = old["body_html"]
@@ -245,15 +258,17 @@ def remove_entry(item: Item, entry_id: str) -> None:
     item["rev"] = int(item.get("rev", 0)) + 1
 
 
-def activity_at(item: Item, owner: str) -> str:
-    """When someone other than the owner last opened, commented or reviewed; '' if never."""
-    times = [item["created_at"]] if item.get("author") != owner else []
-    times += [e["at"] for e in item.get("timeline", []) if e.get("author") != owner]
+def activity_at(item: Item, me: Set[str]) -> str:
+    """When someone other than you last opened, commented or reviewed; '' if never."""
+    times = [item["created_at"]] if not is_me(item.get("author", ""), me) else []
+    times += [
+        e["at"] for e in item.get("timeline", []) if not is_me(e.get("author", ""), me)
+    ]
     return max((t for t in times if t), default="")
 
 
-def unseen(item: Item, seen: Mapping[str, str], owner: str) -> bool:
-    last = activity_at(item, owner)
+def unseen(item: Item, seen: Mapping[str, str], me: Set[str]) -> bool:
+    last = activity_at(item, me)
     return bool(last) and last > seen.get(item["key"], "")
 
 
@@ -265,14 +280,15 @@ def last_word(item: Item) -> tuple[str, str]:
     return item["author"], item["created_at"]
 
 
-def summary(item: Item, is_unseen: bool, owner: str) -> dict[str, Any]:
+def summary(item: Item, is_unseen: bool, account: str, me: Set[str]) -> dict[str, Any]:
     """What the panel lists for an item; bodies come separately when it is opened."""
     entries = item.get("timeline", [])
     last = entries[-1] if entries else None
     who, last_at = last_word(item)
     return {
         "key": item["key"],
-        "account": owner,
+        "account": account,
+        "me": sorted(me),
         "repo": item["repo"],
         "number": item["number"],
         "kind": item["kind"],
@@ -289,7 +305,7 @@ def summary(item: Item, is_unseen: bool, owner: str) -> dict[str, Any]:
         "pr": item.get("pr"),
         "rev": item.get("rev", 0),
         "unseen": is_unseen,
-        "waiting": who != owner,
+        "waiting": not is_me(who, me),
         "last_at": last_at,
         "last": (
             {
@@ -316,19 +332,21 @@ def _age_bucket(created: dt.datetime | None, now: dt.datetime) -> int:
 def snapshot(accounts: Iterable[Mapping[str, Any]], now: dt.datetime) -> dict[str, Any]:
     """Everything the panel draws, from each account's stored state.
 
-    An account mapping holds `account`, `items`, `seen`, `activity`, `repos` (count installed) and `sync`.
+    An account mapping holds `account`, `me` (your logins), `items`, `seen`, `activity`, `repos` (count installed)
+    and `sync`.
     """
     items: list[dict[str, Any]] = []
     activity: list[dict[str, Any]] = []
     syncs: list[dict[str, Any]] = []
     repos_installed = 0
     for acc in accounts:
-        owner = str(acc["account"])
+        account = str(acc["account"])
+        me: Set[str] = acc["me"]
         for item in acc["items"].values():
-            items.append(summary(item, unseen(item, acc["seen"], owner), owner))
+            items.append(summary(item, unseen(item, acc["seen"], me), account, me))
         activity += acc["activity"]
         repos_installed += int(acc["repos"])
-        syncs.append({"account": owner, **acc["sync"]})
+        syncs.append({"account": account, **acc["sync"]})
     items.sort(key=lambda i: i["updated_at"], reverse=True)
 
     by_repo: dict[str, dict[str, Any]] = {}

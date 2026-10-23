@@ -11,7 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import homeassistant.components
 import pytest
-from homeassistant.core import HomeAssistant
+from hass_nabucasa.cloudhooks import CloudhookApiError
+from homeassistant.core import HomeAssistant, is_callback
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.github_inbox import route
@@ -94,14 +95,39 @@ async def test_the_cloud(hass: HomeAssistant, cloud: Any) -> None:
         await route.async_hook_url(hass, "abc", ROUTE_CLOUD)
 
 
-async def test_a_cloudhook_the_cloud_refuses(hass: HomeAssistant, cloud: Any) -> None:
-    cloud.async_get_or_create_cloudhook.side_effect = HomeAssistantError("no")
+async def test_a_lapsed_subscription(hass: HomeAssistant, cloud: Any) -> None:
+    cloud.async_active_subscription.return_value = False
+    assert not route.cloud_ready(hass)
+    assert not route.cloud_signed_in(hass)
+    assert route.available_routes(hass) == []
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        HomeAssistantError("no"),
+        CloudhookApiError("webhook_generate failed"),
+        TimeoutError(),
+        ValueError("Cloud is not connected"),
+    ],
+)
+async def test_a_cloudhook_the_cloud_refuses(
+    hass: HomeAssistant, cloud: Any, error: Exception
+) -> None:
+    cloud.async_get_or_create_cloudhook.side_effect = error
     with pytest.raises(route.RouteUnavailableError):
         await route.async_hook_url(hass, "abc", ROUTE_CLOUD)
 
 
 @pytest.mark.parametrize(
-    "error", [None, HomeAssistantError("gone"), ValueError("unknown")]
+    "error",
+    [
+        None,
+        HomeAssistantError("gone"),
+        ValueError("unknown"),
+        CloudhookApiError("no"),
+        TimeoutError(),
+    ],
 )
 async def test_deleting_a_cloudhook(
     hass: HomeAssistant, cloud: Any, error: Exception | None
@@ -111,11 +137,15 @@ async def test_deleting_a_cloudhook(
     cloud.async_delete_cloudhook.assert_awaited_once_with(hass, "abc")
 
 
-async def test_reconnects_are_reported(hass: HomeAssistant, cloud: Any) -> None:
-    calls: list[None] = []
-    unsub = route.listen_cloud(hass, lambda: calls.append(None))
+async def test_connection_changes_are_reported_on_the_loop(
+    hass: HomeAssistant, cloud: Any
+) -> None:
+    calls: list[bool] = []
+    unsub = route.listen_cloud(hass, calls.append)
     assert unsub is cloud.async_listen_connection_change.return_value
     changed = cloud.async_listen_connection_change.call_args.args[1]
+    # The dispatcher runs a target that is not a callback in an executor thread.
+    assert is_callback(changed)
     changed(State.CLOUD_DISCONNECTED)
     changed(State.CLOUD_CONNECTED)
-    assert len(calls) == 1
+    assert calls == [False, True]

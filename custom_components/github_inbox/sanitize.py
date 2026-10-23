@@ -7,6 +7,7 @@ links so nothing loads from outside Home Assistant.
 
 from __future__ import annotations
 
+import logging
 import re
 from html import escape
 from html.parser import HTMLParser
@@ -93,6 +94,9 @@ MAX_INPUT = 400_000
 
 _CONTROL_RE = re.compile(r"[\x00-\x20\x7f]")
 _SPACE_RE = re.compile(r"\s+")
+_START_RE = re.compile(r"[0-9]{1,9}")
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def safe_url(value: str | None) -> str | None:
@@ -150,7 +154,7 @@ class _Sanitiser(HTMLParser):
             extra = f' href="{escape(href)}"{LINK_ATTRS}'
         elif tag == "ol":
             start = attrs.get("start") or ""
-            if start.isdigit():
+            if _START_RE.fullmatch(start):
                 extra = f' start="{int(start)}"'
         elif tag in ("td", "th"):
             align = (attrs.get("align") or "").lower()
@@ -198,12 +202,17 @@ class _Sanitiser(HTMLParser):
 
 
 def sanitize(html: str | None) -> str:
-    """Safe HTML for the panel from GitHub-rendered HTML."""
+    """Safe HTML for the panel from GitHub-rendered HTML; '' when the input cannot be parsed."""
     if not html:
         return ""
     parser = _Sanitiser()
-    parser.feed(html[:MAX_INPUT])
-    return parser.result()
+    try:
+        parser.feed(html[:MAX_INPUT])
+        return parser.result()
+    except Exception as err:
+        # A body that breaks the parser shows as its escaped source; it never stops a sync.
+        _LOGGER.debug("Could not sanitise a body: %s", type(err).__name__)
+        return ""
 
 
 def text_html(text: str | None) -> str:
@@ -246,8 +255,12 @@ def preview(html: str | None, limit: int = 160) -> str:
     if not html:
         return ""
     parser = _Text()
-    parser.feed(html[:MAX_INPUT])
-    parser.close()
+    try:
+        parser.feed(html[:MAX_INPUT])
+        parser.close()
+    except Exception as err:
+        _LOGGER.debug("Could not read a body's text: %s", type(err).__name__)
+        return ""
     text = _SPACE_RE.sub(" ", "".join(parser.parts)).strip()
     if len(text) <= limit:
         return text

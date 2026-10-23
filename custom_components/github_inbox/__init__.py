@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import EVENT_CORE_CONFIG_UPDATE, Platform
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
@@ -73,11 +73,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: InboxConfigEntry) -> boo
         ) from err
     entry.async_on_unload(lambda: webhook.async_unregister(hass, entry))
 
+    @callback
+    def cloud_changed(connected: bool) -> None:
+        _check_route(hass, entry)
+        if connected:
+            # Deliveries made while the cloud was down are lost to GitHub's log; a sync recovers them.
+            coordinator.schedule_sync()
+
+    @callback
+    def config_changed(_event: Event) -> None:
+        _check_route(hass, entry)
+
     if entry.data.get(CONF_CLOUDHOOK):
-        # Deliveries made while the cloud was down are lost to GitHub's log; a sync recovers them.
-        unsub = route.listen_cloud(hass, coordinator.schedule_sync)
+        unsub = route.listen_cloud(hass, cloud_changed)
         if unsub is not None:
             entry.async_on_unload(unsub)
+    else:
+        entry.async_on_unload(
+            hass.bus.async_listen(EVENT_CORE_CONFIG_UPDATE, config_changed)
+        )
     _check_route(hass, entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -114,6 +128,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: InboxConfigEntry) -> bo
     if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         return False
     coordinator: InboxCoordinator = entry.runtime_data
+    # Timers and refreshes stop before the last write, so none follows it.
+    await coordinator.async_shutdown()
     await coordinator.store.async_flush()
     if not hass.config_entries.async_loaded_entries(DOMAIN):
         panel.async_remove(hass)

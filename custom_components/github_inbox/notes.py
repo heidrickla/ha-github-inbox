@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.parse import quote
@@ -34,6 +35,8 @@ REVIEW_WORDS = {
     "dismissed": "dismissed a review on",
 }
 LIST_LINES = 6
+_MD_RE = re.compile(r"([\\`*_{}\[\]()#+\-.!<>|~])")
+GITHUB = "https://github.com/"
 
 
 def _noun(entry: Mapping[str, Any]) -> str:
@@ -61,6 +64,19 @@ def describe(entry: Mapping[str, Any]) -> str:
     return f"{actor} {verb} {_ref(entry)}: {entry.get('title', '')}"
 
 
+def _md(text: Any) -> str:
+    """Text placed in Markdown as text: titles and previews come from anyone who can open an issue."""
+    return _MD_RE.sub(r"\\\1", " ".join(str(text).split()))
+
+
+def _md_link(text: str, url: Any) -> str:
+    """A Markdown link to GitHub, or the text alone for any other address."""
+    url = str(url or "")
+    if url.startswith(GITHUB) and not any(c in url for c in "()<> "):
+        return f"[{_md(text)}]({url})"
+    return _md(text)
+
+
 def panel_link(key: str | None = None) -> str:
     return f"/{PANEL_URL}" + (f"?item={quote(key, safe='')}" if key else "")
 
@@ -73,8 +89,8 @@ def compose(notes: Sequence[Mapping[str, Any]], missed: bool = False) -> dict[st
         body = str(entry.get("title", ""))
         snippet = str(entry.get("preview") or "")
         message = f"{body}\n{snippet}" if snippet else body
-        markdown = f"[{_ref(entry)} {body}]({entry.get('url', '')})" + (
-            f"\n\n{snippet}" if snippet else ""
+        markdown = _md_link(f"{_ref(entry)} {body}", entry.get("url")) + (
+            f"\n\n{_md(snippet)}" if snippet else ""
         )
         return {
             "title": title,
@@ -89,7 +105,7 @@ def compose(notes: Sequence[Mapping[str, Any]], missed: bool = False) -> dict[st
         lines.append(f"and {more} more")
     when = " while Home Assistant was not listening" if missed else ""
     md_lines = [
-        f"- [{describe(e)}]({e.get('url', '')})" for e in notes[:LIST_LINES]
+        f"- {_md_link(describe(e), e.get('url'))}" for e in notes[:LIST_LINES]
     ] + ([f"- and {more} more"] if more > 0 else [])
     return {
         "title": f"{len(notes)} updates in your repositories{when}",

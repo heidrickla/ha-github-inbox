@@ -35,6 +35,7 @@ CONF_PERSISTENT: Final = "persistent_notification"
 CONF_NOTIFY_ON: Final = "notify_on"
 CONF_INCLUDE_BOTS: Final = "include_bots"
 CONF_INCLUDE_OWN: Final = "include_own"
+CONF_ME: Final = "me"
 
 NOTIFY_OPENED: Final = "opened"
 NOTIFY_COMMENTS: Final = "comments"

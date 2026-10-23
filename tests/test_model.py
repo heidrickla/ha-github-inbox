@@ -5,10 +5,11 @@ from __future__ import annotations
 import datetime as dt
 
 from custom_components.github_inbox import model
-from tests.payloads import comment, issue, pull, review, review_comment
+from tests.payloads import comment, issue, pull, review, review_comment, short_pull
 
 NOW = dt.datetime(2026, 10, 23, 12, 0, tzinfo=dt.UTC)
 REPO = "heidrickla/ha-glkvm"
+ME = model.logins(["heidrickla"])
 
 
 def test_issue_item_takes_github_rendering_and_signature() -> None:
@@ -84,6 +85,17 @@ def test_github_rendering_replaces_a_webhook_plain_copy_of_the_same_source() -> 
     assert item["timeline"][0]["body_rendered"]
 
 
+def test_a_review_webhooks_short_pull_request_keeps_the_stored_counts() -> None:
+    stored = model.merge(None, model.item_from_pull(REPO, pull(5)))
+    partial = model.item_from_pull(REPO, short_pull(5))
+    assert partial["pr"] is None
+    assert "comments" not in partial
+    merged = model.merge(stored, partial)
+    assert merged["pr"] == stored["pr"]
+    assert merged["comments"] == stored["comments"] == 3
+    assert model.merge(None, partial)["comments"] == 0
+
+
 def test_timeline_orders_entries_and_skips_container_reviews() -> None:
     entries = model.timeline(
         [comment(1, at="2026-10-20T10:00:00Z")],
@@ -126,26 +138,34 @@ def test_upsert_entry_replaces_by_id_and_keeps_rendering_for_the_same_source() -
     assert [e["id"] for e in item["timeline"]] == ["c1"]
 
 
-def test_activity_and_unseen_ignore_the_owner() -> None:
-    item = model.merge(None, model.item_from_issue(REPO, issue(2, author="heidrickla")))
-    assert model.activity_at(item, "heidrickla") == ""
-    assert not model.unseen(item, {}, "heidrickla")
+def test_activity_and_unseen_ignore_you() -> None:
+    item = model.merge(None, model.item_from_issue(REPO, issue(2, author="HeidrickLA")))
+    assert model.activity_at(item, ME) == ""
+    assert not model.unseen(item, {}, ME)
     model.upsert_entry(
         item,
         model.comment_entry(comment(1, author="someone", at="2026-10-22T10:00:00Z")),
     )
-    assert model.unseen(item, {}, "heidrickla")
-    assert not model.unseen(item, {item["key"]: "2026-10-22T10:00:00Z"}, "heidrickla")
-    assert model.unseen(item, {item["key"]: "2026-10-22T09:59:59Z"}, "heidrickla")
+    assert model.unseen(item, {}, ME)
+    assert not model.unseen(item, {item["key"]: "2026-10-22T10:00:00Z"}, ME)
+    assert model.unseen(item, {item["key"]: "2026-10-22T09:59:59Z"}, ME)
+
+
+def test_logins_are_compared_without_case_or_blanks() -> None:
+    assert model.logins(["HeidrickLA", " ", "", "Other "]) == {"heidrickla", "other"}
+    assert model.is_me("HEIDRICKLA", ME)
+    assert not model.is_me("", ME)
 
 
 def test_last_word_and_waiting() -> None:
     item = model.merge(None, model.item_from_issue(REPO, issue(2, author="someone")))
     assert model.last_word(item) == ("someone", item["created_at"])
-    assert model.summary(item, False, "heidrickla")["waiting"] is True
+    assert model.summary(item, False, "my-org", ME)["waiting"] is True
     model.upsert_entry(item, model.comment_entry(comment(1, author="heidrickla")))
-    summary = model.summary(item, False, "heidrickla")
+    summary = model.summary(item, False, "my-org", ME)
     assert summary["waiting"] is False
+    assert summary["account"] == "my-org"
+    assert summary["me"] == ["heidrickla"]
     assert summary["last"]["author"] == "heidrickla"
     assert summary["comments"] == 1
 
@@ -153,6 +173,7 @@ def test_last_word_and_waiting() -> None:
 def _account(items: list[model.Item], activity: list[dict] | None = None) -> dict:
     return {
         "account": "heidrickla",
+        "me": ME,
         "items": {i["key"]: i for i in items},
         "seen": {},
         "activity": activity or [],

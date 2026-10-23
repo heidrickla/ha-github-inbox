@@ -11,4 +11,5 @@ Everything a user of this integration would notice, newest first. The format fol
 - Sensors for open issues, open pull requests, unseen items and the last delivery; an activity event entity.
 - Notifications to chosen notify services and a persistent notification, batched over 5 seconds, with a link into the panel on the Companion app.
 - The `github_inbox.resync` administrator action.
+- The Your GitHub logins option, for an organization's inbox: the logins counted as you for own activity, unseen and waiting.
 - Re-authentication, reconfiguration of the webhook route, a repair when the route is down, and diagnostics.

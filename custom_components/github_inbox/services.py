@@ -8,6 +8,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.service import async_register_admin_service
 
 from .const import DOMAIN, SERVICE_RESYNC
+from .coordinator import InboxCoordinator
 
 
 @callback
@@ -20,7 +21,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             )
         failed = []
         for entry in entries:
-            coordinator = entry.runtime_data
+            coordinator: InboxCoordinator = entry.runtime_data
             await coordinator.async_refresh()
             if not coordinator.last_update_success:
                 failed.append(entry.title)

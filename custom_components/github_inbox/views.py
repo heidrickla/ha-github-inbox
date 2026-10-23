@@ -10,6 +10,7 @@ can read that installation.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from html import escape
 from http import HTTPStatus
@@ -28,6 +29,7 @@ CREATED_PATH = "/api/github_inbox/created"
 INSTALLED_PATH = "/api/github_inbox/installed"
 STAGE_CREATE = "create"
 STAGE_INSTALL = "install"
+_ID_RE = re.compile(r"[0-9]{1,19}")
 
 
 @dataclass(slots=True)
@@ -166,7 +168,7 @@ class InstalledView(HomeAssistantView):
     async def get(self, request: web.Request) -> web.Response:
         hass = request.app[KEY_HASS]
         raw = request.query.get("installation_id", "")
-        if not raw.isdigit():
+        if not _ID_RE.fullmatch(raw):
             return gone_page()
         waiting = [p for p in pending(hass).values() if p.stage == STAGE_INSTALL]
         for item in waiting:
