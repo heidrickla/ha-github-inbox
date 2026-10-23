@@ -2,6 +2,12 @@
 
 Everything a user of this integration would notice, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version numbers are the ones in `manifest.json`.
 
+## [0.1.2] - 2026-10-23
+
+### Fixed
+
+- On Android with the GitHub app installed, GitHub's create page stays in the browser that sent the app's description. The browser had handed it to the GitHub app, which offered other browsers, and GitHub answered "We didn't find an App Manifest for your request" in any of them.
+
 ## [0.1.1] - 2026-10-23
 
 ### Fixed

@@ -307,6 +307,36 @@ async def test_without_a_request_or_a_url_the_step_url_is_a_path(
     hass.config_entries.flow.async_abort(result["flow_id"])
 
 
+@pytest.mark.parametrize(
+    ("agent", "query", "hops"),
+    [
+        ("Mozilla/5.0 (Linux; Android 16; Pixel 11) Chrome/150.0 Mobile", "", True),
+        (
+            "Mozilla/5.0 (Linux; Android 16; Pixel 11) Chrome/150.0 Mobile",
+            "?go=1",
+            False,
+        ),
+        ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/150.0", "", False),
+        (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) Safari/604.1",
+            "",
+            False,
+        ),
+    ],
+)
+async def test_an_android_browser_hops_through_a_failed_app_launch_first(
+    hass: HomeAssistant, hass_client_no_auth: Any, agent: str, query: str, hops: bool
+) -> None:
+    result = await start(hass)
+    client = await hass_client_no_auth()
+    url = f"{views.START_PATH}/{nonce_of(result)}{query}"
+    page = await (await client.get(url, headers={"User-Agent": agent})).text()
+    assert ("intent://#Intent;scheme=github-inbox-stay;" in page) is hops
+    assert ("'?go=1'" in page) is hops
+    assert ("getElementById('f').submit()" in page) is not hops
+    hass.config_entries.flow.async_abort(result["flow_id"])
+
+
 async def test_an_organization_app(
     hass: HomeAssistant, hass_client_no_auth: Any
 ) -> None:

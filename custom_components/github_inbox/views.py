@@ -16,7 +16,7 @@ from html import escape
 from http import HTTPStatus
 from typing import Any
 
-from aiohttp import web
+from aiohttp import hdrs, web
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResultType, UnknownFlow
 from homeassistant.helpers.http import KEY_HASS, HomeAssistantView
@@ -30,6 +30,9 @@ INSTALLED_PATH = "/api/github_inbox/installed"
 STAGE_CREATE = "create"
 STAGE_INSTALL = "install"
 _ID_RE = re.compile(r"[0-9]{1,19}")
+# Android Chrome and its forks hand GitHub's redirect after the post to the GitHub app, away from the browser holding
+# the manifest. An app launch that fails first keeps the rest of the navigation in the browser (crbug.com/330555390).
+HOP = "intent://#Intent;scheme=github-inbox-stay;S.browser_fallback_url="
 
 
 @dataclass(slots=True)
@@ -118,6 +121,12 @@ class StartView(HomeAssistantView):
             "setup_url": origin + INSTALLED_PATH,
         }
         action = f"{item.post_url}?state={nonce}"
+        go = (
+            "document.getElementById('f').submit()"
+            if request.query.get("go") == "1"
+            or "Android" not in request.headers.get(hdrs.USER_AGENT, "")
+            else f"location.replace({json.dumps(HOP)}+encodeURIComponent(location.origin+location.pathname+'?go=1')+';end')"
+        )
         body = (
             "<p>Sending the app's description to GitHub. Check the name, then press "
             "Create GitHub App.</p>"
@@ -130,7 +139,7 @@ class StartView(HomeAssistantView):
             "<script>const m=document.getElementById('m'),v=JSON.parse(m.value);"
             f"v.redirect_url=location.origin+{json.dumps(CREATED_PATH)};"
             f"v.setup_url=location.origin+{json.dumps(INSTALLED_PATH)};"
-            "m.value=JSON.stringify(v);document.getElementById('f').submit()</script>"
+            f"m.value=JSON.stringify(v);{go}</script>"
         )
         return page("Creating the GitHub App", body, script)
 

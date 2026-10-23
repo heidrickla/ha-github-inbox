@@ -17,7 +17,7 @@
       },
       "create": {
         "title": "Create the app on GitHub",
-        "description": "Open GitHub, check the app's name and press Create GitHub App. This dialog continues by itself."
+        "description": "Open GitHub, check the app's name and press Create GitHub App. If the phone asks which app opens GitHub, choose the browser the page opened in. This dialog continues by itself."
       },
       "install": {
         "title": "Install the app",
