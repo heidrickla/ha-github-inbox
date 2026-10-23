@@ -175,7 +175,7 @@ A dashboard badge for unseen items: add `sensor.github_heidrickla_unseen` as a b
 
 | Symptom | Where to look |
 |---|---|
-| Nothing arrives | The app's page on GitHub, Advanced, Recent Deliveries. 200 is applied. 401 means the delivery was signed with a secret this entry does not hold, as when the app was recreated elsewhere. 404 means no loaded entry owns the webhook. |
+| Nothing arrives | The app's page on GitHub, Advanced, Recent Deliveries, against the diagnostics' last delivery. Home Assistant answers 200 for a webhook no loaded entry has registered, so a 200 that leaves the last delivery unchanged means the entry is not loaded. 401 means the delivery was signed with a secret this entry does not hold, as when the app was recreated elsewhere. |
 | A repair says GitHub cannot reach Home Assistant | The chosen route is down: sign in to Home Assistant Cloud, set an external URL, or Reconfigure to the other route. |
 | The panel says Sync failed | Hover the chip for GitHub's answer. A rate limit or an outage clears on the next retry; Sync now retries at once. |
 | A page says "Nothing is waiting" | The setup was closed or restarted. Start it again from Devices & services. |
