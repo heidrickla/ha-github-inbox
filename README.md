@@ -18,7 +18,7 @@ Without Home Assistant Cloud or an external URL, setup says what is missing and 
 
 ### The panel
 
-**GitHub Inbox** in the sidebar, for administrators. Dark by default, with a light toggle.
+GitHub Inbox in the sidebar, for administrators. Dark by default, with a light toggle.
 
 | Part | What it shows |
 |---|---|
