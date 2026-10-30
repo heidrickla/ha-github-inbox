@@ -26,6 +26,7 @@ from pytest_homeassistant_custom_component.test_util.aiohttp import (
 from custom_components.github_inbox import route, views
 from custom_components.github_inbox.const import (
     APP_EVENTS,
+    CONF_ADVANCED,
     CONF_APP_ID,
     CONF_APP_NAME,
     CONF_CLOUDHOOK,
@@ -111,12 +112,24 @@ async def start(hass: HomeAssistant, **user: Any) -> Any:
     assert result["step_id"] == "user"
     return await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {CONF_APP_NAME: "HA Inbox test", CONF_ROUTE: ROUTE_CLOUD, **user},
+        advanced(**user),
     )
 
 
-async def through_github(hass: HomeAssistant, client: Any, result: Any) -> Any:
-    """The browser's trip through GitHub: the manifest page, creation, installation."""
+def advanced(**user: Any) -> dict[str, Any]:
+    """The first form's input: everything sits in the collapsed Advanced section."""
+    return {
+        CONF_ADVANCED: {CONF_APP_NAME: "HA Inbox test", CONF_ROUTE: ROUTE_CLOUD, **user}
+    }
+
+
+async def through_github(
+    hass: HomeAssistant,
+    client: Any,
+    result: Any,
+    on_notify: Callable[[Any], dict[str, Any]] = lambda _: {},
+) -> Any:
+    """The browser's trip through GitHub: the manifest page, creation, installation, then the notify step."""
     assert result["type"] is FlowResultType.EXTERNAL_STEP
     assert result["step_id"] == "create"
     nonce = nonce_of(result)
@@ -134,7 +147,12 @@ async def through_github(hass: HomeAssistant, client: Any, result: Any) -> Any:
     resp = await client.get(f"{views.INSTALLED_PATH}?installation_id={INSTALLATION_ID}")
     assert resp.status == 200
     assert "finishes the setup" in await resp.text()
-    return await hass.config_entries.flow.async_configure(result["flow_id"])
+    result = await hass.config_entries.flow.async_configure(result["flow_id"])
+    if result["type"] is FlowResultType.FORM and result["step_id"] == "notify":
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], on_notify(result)
+        )
+    return result
 
 
 async def test_the_whole_setup(
@@ -186,6 +204,60 @@ async def test_the_whole_setup(
     assert held(hass) == {}
 
 
+async def test_the_last_step_offers_the_phones_already_ticked(
+    hass: HomeAssistant,
+    hass_client_no_auth: Any,
+    github_ready: GitHub,
+    mock_route: dict[str, MagicMock],
+) -> None:
+    async_mock_service(hass, "notify", "mobile_app_pixel_9")
+    async_mock_service(hass, "notify", "family_email")
+    async_mock_service(hass, "notify", "send_message")
+    seen: dict[str, Any] = {}
+
+    def on_notify(form: Any) -> dict[str, Any]:
+        seen.update(form)
+        return {CONF_NOTIFY_TARGETS: ["mobile_app_pixel_9"], CONF_PERSISTENT: False}
+
+    result = await start(hass)
+    result = await through_github(hass, await hass_client_no_auth(), result, on_notify)
+    schema = {str(k): k for k in seen["data_schema"].schema}
+    assert schema[CONF_NOTIFY_TARGETS].default() == ["mobile_app_pixel_9"]
+    assert seen["data_schema"].schema[schema[CONF_NOTIFY_TARGETS]].config[
+        "options"
+    ] == ["family_email", "mobile_app_pixel_9"]
+    assert schema[CONF_PERSISTENT].default() is True
+    assert seen["description_placeholders"] == {"account": ACCOUNT, "repositories": "1"}
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["options"][CONF_NOTIFY_TARGETS] == ["mobile_app_pixel_9"]
+    assert result["options"][CONF_PERSISTENT] is False
+
+
+async def test_closing_the_last_step_drops_the_cloudhook(
+    hass: HomeAssistant,
+    hass_client_no_auth: Any,
+    github_ready: GitHub,
+    mock_route: dict[str, MagicMock],
+) -> None:
+    flow_ids: list[str] = []
+
+    def on_notify(form: Any) -> dict[str, Any]:
+        flow_ids.append(form["flow_id"])
+        raise _Closed
+
+    result = await start(hass)
+    with pytest.raises(_Closed):
+        await through_github(hass, await hass_client_no_auth(), result, on_notify)
+    hass.config_entries.flow.async_abort(flow_ids[0])
+    await hass.async_block_till_done(wait_background_tasks=True)
+    mock_route["delete"].assert_awaited_once()
+    assert not hass.config_entries.async_entries(DOMAIN)
+
+
+class _Closed(Exception):
+    """The user closes the dialog at the notify step."""
+
+
 def held(hass: HomeAssistant) -> dict[str, int]:
     return dict(hass.data.get(route.DATA_HELD) or {})
 
@@ -234,7 +306,7 @@ async def test_github_returns_to_the_origin_the_browser_used(
     flow = await resp.json()
     resp = await client.post(
         f"/api/config/config_entries/flow/{flow['flow_id']}",
-        json={CONF_APP_NAME: "HA Inbox test", CONF_ROUTE: ROUTE_CLOUD},
+        json=advanced(),
     )
     step = await resp.json()
     base = client.make_url("/")
@@ -303,7 +375,7 @@ async def test_the_companion_app_is_sent_to_another_address(
     ):
         resp = await client.post(
             f"/api/config/config_entries/flow/{flow['flow_id']}",
-            json={CONF_APP_NAME: "HA Inbox test", CONF_ROUTE: ROUTE_CLOUD},
+            json=advanced(),
             headers=headers,
         )
     step = await resp.json()
@@ -422,7 +494,7 @@ async def test_a_route_that_went_away_while_the_form_was_open(
     )
     mock_route["external"].return_value = None
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_APP_NAME: "HA Inbox test", CONF_ROUTE: ROUTE_EXTERNAL}
+        result["flow_id"], advanced(**{CONF_ROUTE: ROUTE_EXTERNAL})
     )
     assert result["errors"] == {CONF_ROUTE: "route_unavailable"}
 
@@ -435,15 +507,48 @@ async def test_a_cloudhook_that_cannot_be_made(
     assert result["errors"] == {CONF_ROUTE: "route_unavailable"}
 
 
-async def test_no_route_aborts(
+async def test_without_a_route_the_flow_says_how_and_checks_again(
     hass: HomeAssistant, mock_route: dict[str, MagicMock]
 ) -> None:
     mock_route["ready"].return_value = False
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
     )
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "no_route"
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "no_route"
+    assert result["errors"] == {}
+    assert result["description_placeholders"] == {
+        "cloud_url": "/config/cloud",
+        "network_url": "/config/network",
+    }
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["step_id"] == "no_route"
+    assert result["errors"] == {"base": "still_no_route"}
+    mock_route["ready"].return_value = True
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    hass.config_entries.flow.async_abort(result["flow_id"])
+
+
+async def test_submitting_the_form_untouched_starts_on_github(
+    hass: HomeAssistant, hass_client_no_auth: Any, mock_route: dict[str, MagicMock]
+) -> None:
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    assert list(result["data_schema"].schema) == [CONF_ADVANCED]
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.EXTERNAL_STEP
+    client = await hass_client_no_auth()
+    page = html.unescape(
+        await (await client.get(f"{views.START_PATH}/{nonce_of(result)}")).text()
+    )
+    manifest = json.loads(re.search(r'name=manifest value="(.*?)">', page).group(1))
+    assert re.fullmatch(r"HA Inbox [0-9a-f]{6}", manifest["name"])
+    assert 'action="https://github.com/settings/apps/new?state=' in page
+    assert mock_route["hook"].await_args.args[2] == ROUTE_CLOUD
+    hass.config_entries.flow.async_abort(result["flow_id"])
 
 
 async def test_an_external_route(
@@ -696,7 +801,7 @@ async def test_reauth_with_a_refused_key_makes_a_new_app_on_the_same_webhook(
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_APP_NAME: "HA Inbox again", CONF_ROUTE: ROUTE_CLOUD}
+        result["flow_id"], advanced(**{CONF_APP_NAME: "HA Inbox again"})
     )
     assert mock_route["hook"].await_args.args[1:] == (WEBHOOK_ID, ROUTE_CLOUD)
     client = await hass_client_no_auth()
@@ -731,7 +836,7 @@ async def test_reauth_onto_the_external_route_drops_the_cloudhook(
     result = await reauth(hass, loaded)
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {CONF_APP_NAME: "HA Inbox again", CONF_ROUTE: ROUTE_EXTERNAL},
+        advanced(**{CONF_APP_NAME: "HA Inbox again", CONF_ROUTE: ROUTE_EXTERNAL}),
     )
     client = await hass_client_no_auth()
     result = await through_github(hass, client, result)

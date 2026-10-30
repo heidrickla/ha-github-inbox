@@ -1,6 +1,6 @@
 """Config flow: create a private GitHub App from a manifest, install it, and keep its webhook pointed here.
 
-Nothing is typed but a name. GitHub creates the app from the manifest the flow posts (its webhook URL, events and
+Nothing is typed: the name, account and route default and wait in a collapsed section. GitHub creates the app from the manifest the flow posts (its webhook URL, events and
 read-only permissions), hands its key and webhook secret to Home Assistant once, and the account owner installs it on
 all repositories or a selection.
 """
@@ -20,7 +20,8 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlowWithReload,
 )
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.http import current_request
 from homeassistant.helpers.network import NoURLAvailableError, get_url
@@ -49,6 +50,7 @@ from .const import (
     APP_PERMISSIONS,
     CONF_ACCOUNT,
     CONF_ACCOUNT_ID,
+    CONF_ADVANCED,
     CONF_APP_ID,
     CONF_APP_NAME,
     CONF_APP_SLUG,
@@ -105,6 +107,20 @@ def _route_selector(routes: list[str]) -> SelectSelector:
     )
 
 
+def _notify_targets(hass: HomeAssistant, chosen: list[str]) -> list[str]:
+    # `send_message` addresses notify entities and needs an entity id.
+    services = set(hass.services.async_services_for_domain("notify"))
+    return sorted((services - {"send_message"}) | set(chosen))
+
+
+def _targets_selector(targets: list[str]) -> SelectSelector:
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=targets, multiple=True, mode=SelectSelectorMode.DROPDOWN
+        )
+    )
+
+
 class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
@@ -116,6 +132,8 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
         self._code = ""
         self._creds: AppCredentials | None = None
         self._installation: dict[str, Any] | None = None
+        self._data: dict[str, Any] = {}
+        self._repos = 0
         # Set once the webhook belongs to an entry, so closing the flow keeps its cloudhook.
         self._keep_hook = False
         self._held: set[str] = set()
@@ -134,16 +152,17 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         routes = route.available_routes(self.hass)
         if not routes:
-            return self.async_abort(reason="no_route")
+            return await self.async_step_no_route()
         errors: dict[str, str] = {}
         if user_input is None:
             self.hass.async_create_background_task(
                 route.async_sweep(self.hass), f"{DOMAIN} cloudhook sweep"
             )
         if user_input is not None:
-            name = str(user_input[CONF_APP_NAME]).strip()
-            org = str(user_input.get(CONF_ORGANIZATION) or "").strip()
-            chosen = str(user_input.get(CONF_ROUTE) or routes[0])
+            advanced = dict(user_input.get(CONF_ADVANCED) or {})
+            name = str(advanced.get(CONF_APP_NAME) or self._default_name).strip()
+            org = str(advanced.get(CONF_ORGANIZATION) or "").strip()
+            chosen = str(advanced.get(CONF_ROUTE) or routes[0])
             if not name or len(name) > NAME_MAX:
                 errors[CONF_APP_NAME] = "invalid_name"
             elif org and not ORG_RE.match(org):
@@ -169,14 +188,38 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
                         manifest=build_manifest(name, hook_url),
                     )
                     return await self.async_step_create()
-        schema = vol.Schema(
+        fields = vol.Schema(
             {
                 vol.Required(CONF_APP_NAME, default=self._default_name): str,
                 vol.Optional(CONF_ORGANIZATION, default=""): str,
                 vol.Required(CONF_ROUTE, default=routes[0]): _route_selector(routes),
             }
         )
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_ADVANCED, default={}): section(
+                    fields, {"collapsed": not errors}
+                )
+            }
+        )
+        if user_input is not None:
+            schema = self.add_suggested_values_to_schema(schema, user_input)
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
+
+    async def async_step_no_route(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """GitHub cannot reach this Home Assistant yet; say how to fix it and check again on submit."""
+        if user_input is not None and route.available_routes(self.hass):
+            return await self.async_step_user()
+        return self.async_show_form(
+            step_id="no_route",
+            errors={"base": "still_no_route"} if user_input is not None else {},
+            description_placeholders={
+                "cloud_url": "/config/cloud",
+                "network_url": "/config/network",
+            },
+        )
 
     async def async_step_create(
         self, user_input: dict[str, Any] | None = None
@@ -233,7 +276,7 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
         account = installation.get("account") or {}
         client = InstallationClient(self._app(creds), int(installation.get("id", 0)))
         try:
-            await client.repositories()
+            repositories = await client.repositories()
         except GitHubError:
             return self.async_abort(reason="cannot_connect")
         data = {
@@ -249,6 +292,7 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_ACCOUNT_ID: int(account.get("id") or 0),
         }
         await self.async_set_unique_id(str(data[CONF_ACCOUNT_ID]))
+        self._data = data
         if self.source == SOURCE_REAUTH:
             self._abort_if_unique_id_mismatch(reason="wrong_account")
             entry = self._get_reauth_entry()
@@ -259,17 +303,46 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             return self.async_update_reload_and_abort(entry, data_updates=data)
         self._abort_if_unique_id_configured()
-        self._keep_hook = True
-        return self.async_create_entry(
-            title=str(data[CONF_ACCOUNT]),
-            data=data,
-            options={
-                CONF_ME: [str(data[CONF_ACCOUNT])],
-                CONF_NOTIFY_TARGETS: [],
-                CONF_PERSISTENT: True,
-                CONF_NOTIFY_ON: list(DEFAULT_NOTIFY_ON),
-                CONF_INCLUDE_BOTS: False,
-                CONF_INCLUDE_OWN: False,
+        self._repos = sum(1 for row in repositories.rows if row.get("full_name"))
+        return await self.async_step_notify()
+
+    async def async_step_notify(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Where new activity goes; the phones are ticked already, so Submit is enough."""
+        data = self._data
+        if user_input is not None:
+            self._keep_hook = True
+            return self.async_create_entry(
+                title=str(data[CONF_ACCOUNT]),
+                data=data,
+                options={
+                    CONF_ME: [str(data[CONF_ACCOUNT])],
+                    CONF_NOTIFY_TARGETS: list(
+                        user_input.get(CONF_NOTIFY_TARGETS) or []
+                    ),
+                    CONF_PERSISTENT: bool(user_input.get(CONF_PERSISTENT, True)),
+                    CONF_NOTIFY_ON: list(DEFAULT_NOTIFY_ON),
+                    CONF_INCLUDE_BOTS: False,
+                    CONF_INCLUDE_OWN: False,
+                },
+            )
+        targets = _notify_targets(self.hass, [])
+        phones = [t for t in targets if t.startswith("mobile_app_")]
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_NOTIFY_TARGETS, default=phones): _targets_selector(
+                    targets
+                ),
+                vol.Required(CONF_PERSISTENT, default=True): BooleanSelector(),
+            }
+        )
+        return self.async_show_form(
+            step_id="notify",
+            data_schema=schema,
+            description_placeholders={
+                "account": str(data[CONF_ACCOUNT]),
+                "repositories": str(self._repos),
             },
         )
 
@@ -464,20 +537,14 @@ class InboxOptionsFlow(OptionsFlowWithReload):
         current = self.config_entry.options
         me = list(current.get(CONF_ME) or [self.config_entry.data[CONF_ACCOUNT]])
         chosen = list(current.get(CONF_NOTIFY_TARGETS, []))
-        # `send_message` addresses notify entities and needs an entity id.
-        services = set(self.hass.services.async_services_for_domain("notify"))
-        targets = sorted((services - {"send_message"}) | set(chosen))
+        targets = _notify_targets(self.hass, chosen)
         schema = vol.Schema(
             {
                 vol.Required(CONF_ME, default=me): TextSelector(
                     TextSelectorConfig(multiple=True)
                 ),
-                vol.Optional(CONF_NOTIFY_TARGETS, default=chosen): SelectSelector(
-                    SelectSelectorConfig(
-                        options=targets,
-                        multiple=True,
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
+                vol.Optional(CONF_NOTIFY_TARGETS, default=chosen): _targets_selector(
+                    targets
                 ),
                 vol.Required(
                     CONF_PERSISTENT, default=bool(current.get(CONF_PERSISTENT, True))

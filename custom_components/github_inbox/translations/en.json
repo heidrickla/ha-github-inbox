@@ -2,18 +2,28 @@
   "config": {
     "step": {
       "user": {
-        "title": "Create the GitHub App",
-        "description": "Home Assistant creates a private GitHub App with read-only access to issues, pull requests and repository metadata. GitHub then shows it for confirmation and asks which repositories to install it on.",
-        "data": {
-          "app_name": "App name",
-          "organization": "Organization",
-          "route": "Webhook route"
-        },
-        "data_description": {
-          "app_name": "Unique across GitHub, at most 34 characters.",
-          "organization": "Leave empty to create the app on your personal account.",
-          "route": "How GitHub reaches this Home Assistant."
+        "title": "Connect GitHub",
+        "description": "Home Assistant creates a private GitHub App on your account that can only read issues, pull requests and repository metadata. GitHub opens to confirm it, then asks which repositories to install it on. GitHub reaches this Home Assistant through Home Assistant Cloud when you are signed in, otherwise through the external URL.",
+        "sections": {
+          "advanced": {
+            "name": "Advanced",
+            "description": "Change these only to name the app yourself, create it on an organization, or choose the other route.",
+            "data": {
+              "app_name": "App name",
+              "organization": "Organization",
+              "route": "Webhook route"
+            },
+            "data_description": {
+              "app_name": "Unique across GitHub, at most 34 characters.",
+              "organization": "Leave empty to create the app on your personal account.",
+              "route": "How GitHub reaches this Home Assistant."
+            }
+          }
         }
+      },
+      "no_route": {
+        "title": "GitHub cannot reach this Home Assistant",
+        "description": "GitHub delivers each change to Home Assistant over the internet. Do one of these, then press Submit to check again:\n\n- Sign in to [Home Assistant Cloud]({cloud_url}).\n- Set an external URL under [Network]({network_url}) that is reachable from the internet."
       },
       "create": {
         "title": "Create the app on GitHub",
@@ -22,6 +32,18 @@
       "install": {
         "title": "Install the app",
         "description": "Install the app on all repositories or a selection. This dialog continues by itself once GitHub returns."
+      },
+      "notify": {
+        "title": "Notifications for {account}",
+        "description": "The app is installed on {repositories} repositories. Choose where new issues, pull requests, comments and reviews are sent. You can change this later under Configure.",
+        "data": {
+          "notify_targets": "Notify",
+          "persistent_notification": "Home Assistant notification"
+        },
+        "data_description": {
+          "notify_targets": "Your phones with the Home Assistant app are already selected.",
+          "persistent_notification": "Also add each message to Home Assistant's notification list."
+        }
       },
       "reauth_confirm": {
         "title": "Reconnect GitHub Inbox",
@@ -41,10 +63,10 @@
       "route_unavailable": "That route cannot carry webhooks now.",
       "cannot_connect": "GitHub could not be reached.",
       "invalid_auth": "GitHub refused the app's key.",
-      "suspended": "The app is suspended on GitHub. Unsuspend it in the account's installed apps, then submit again."
+      "suspended": "The app is suspended on GitHub. Unsuspend it in the account's installed apps, then submit again.",
+      "still_no_route": "GitHub still cannot reach this Home Assistant. Sign in to Home Assistant Cloud or set an external URL, then submit again."
     },
     "abort": {
-      "no_route": "GitHub cannot reach this Home Assistant: sign in to Home Assistant Cloud or set an external URL.",
       "conversion_failed": "GitHub did not hand over the new app's credentials. The code lasts one hour; start again.",
       "cannot_connect": "The app is installed but its repositories could not be read.",
       "already_configured": "This GitHub account already has an inbox.",

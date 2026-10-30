@@ -2,6 +2,15 @@
 
 Everything a user of this integration would notice, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version numbers are the ones in `manifest.json`.
 
+## [0.1.6] - 2026-10-29
+
+### Changed
+
+- The setup asks for nothing to be typed. The first screen is Connect GitHub with one Submit; the app's name, an organization and the webhook route sit in a collapsed Advanced section with their defaults.
+- When GitHub cannot reach Home Assistant, the setup shows how to fix it (Home Assistant Cloud or an external URL) and checks again on Submit, instead of ending.
+- The last step chooses where notifications go, with the phones that have the Home Assistant app already ticked, so a new inbox notifies without a trip to Configure.
+- The README opens the repository in HACS and starts the setup with My Home Assistant buttons.
+
 ## [0.1.5] - 2026-10-23
 
 ### Fixed

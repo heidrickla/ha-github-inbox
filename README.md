@@ -2,7 +2,7 @@
 
 Open issues and pull requests across your GitHub repositories, in a Home Assistant sidebar panel, with each comment and review collapsed to one line until you open it. GitHub pushes every change to Home Assistant through a webhook, so nothing polls. New issues, pull requests, comments and reviews can also notify your phone.
 
-The integration creates a private GitHub App for your account from inside the config flow. GitHub hands the app's key and webhook secret to Home Assistant once; nothing is typed but a name.
+The integration creates a private GitHub App for your account from inside the config flow. GitHub hands the app's key and webhook secret to Home Assistant once; the setup asks for nothing to be typed.
 
 ## What you get
 
@@ -55,15 +55,23 @@ New activity goes to the notify services you choose and, optionally, to a persis
 
 ## Installation
 
-HACS: add `https://github.com/heidrickla/ha-github-inbox` as a custom repository of type Integration, install GitHub Inbox, and restart Home Assistant.
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=heidrickla&repository=ha-github-inbox&category=integration)
 
-Manual: copy `custom_components/github_inbox` into your configuration's `custom_components` folder and restart Home Assistant.
+1. Press the button above, then Download in HACS, and restart Home Assistant when it asks.
+2. Press this button to start the setup:
 
-Then Settings, Devices & services, Add integration, GitHub Inbox:
+[![Open your Home Assistant instance and start setting up GitHub Inbox.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=github_inbox)
 
-1. Name the app and pick the webhook route. A window opens on GitHub showing the app it is about to create.
-2. Press Create GitHub App. GitHub returns you to Home Assistant, and the dialog moves on to the app's install page on GitHub.
-3. Install it on all repositories, or a selection. GitHub returns you to Home Assistant and the setup finishes.
+The setup asks for nothing to be typed:
+
+1. Connect GitHub: press Submit. A window opens on GitHub showing the app it is about to create.
+2. Press Create GitHub App on GitHub. The dialog moves on to the app's install page.
+3. Install it on all repositories, or a selection. GitHub returns you to Home Assistant.
+4. Notifications: your phones with the Home Assistant app are already ticked. Press Submit.
+
+The Advanced section of the first screen holds the app's name, an organization to create it on instead of your account, and the webhook route; the defaults fit most setups. If GitHub cannot reach Home Assistant yet, the setup says so and links to Home Assistant Cloud and the network settings, and Submit checks again.
+
+Without the buttons: HACS, the three-dot menu, Custom repositories, add `https://github.com/heidrickla/ha-github-inbox` as an Integration, download GitHub Inbox and restart; then Settings, Devices & services, Add integration, GitHub Inbox. Manual install: copy `custom_components/github_inbox` into your configuration's `custom_components` folder and restart.
 
 From the Home Assistant app, the GitHub pages open in the phone's browser at another of Home Assistant's addresses: the Home Assistant Cloud address while the app uses the local one, the local address otherwise. On Android the create and install pages first open an `intent:` address that no app handles, so the browser keeps GitHub's pages and does not pass them to the GitHub app.
 

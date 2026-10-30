@@ -26,6 +26,7 @@ CONF_ACCOUNT_ID: Final = "account_id"
 CONF_APP_NAME: Final = "app_name"
 CONF_ORGANIZATION: Final = "organization"
 CONF_ROUTE: Final = "route"
+CONF_ADVANCED: Final = "advanced"
 ROUTE_CLOUD: Final = "cloud"
 ROUTE_EXTERNAL: Final = "external"
 
