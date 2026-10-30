@@ -4,6 +4,16 @@ Open issues and pull requests across your GitHub repositories, in a Home Assista
 
 The integration creates a private GitHub App for your account from inside the config flow. GitHub hands the app's key and webhook secret to Home Assistant once; the setup asks for nothing to be typed.
 
+## Screenshots
+
+![The Connect GitHub setup screen with the Advanced section collapsed](docs/images/setup.png)
+
+The first setup screen. Submit opens GitHub to create the app.
+
+![The setup screen shown when GitHub cannot reach Home Assistant](docs/images/no-route.png)
+
+Without Home Assistant Cloud or an external URL, setup says what is missing and checks again on Submit.
+
 ## What you get
 
 ### The panel
