@@ -524,7 +524,8 @@ def scan_published_tree() -> None:
 def main() -> int:
     manifest = read_json(COMP, "manifest.json")
     const_src = read(COMP, "const.py")
-    strings = read_json(COMP, "strings.json")
+    # The Marketplace ships translations/en.json alone; hassfest validates it.
+    strings = read_json(COMP, "translations", "en.json")
 
     # ---------------------------------------------------------- manifest
     for key in REQUIRED_MANIFEST:
@@ -587,10 +588,13 @@ def main() -> int:
         check(os.path.isfile(os.path.join(brand, name)), f"missing brand/{name}")
 
     # ---------------------------------------------------------- translations
-    en = read_json(COMP, "translations", "en.json")
     check(
-        strings == en,
-        "strings.json and translations/en.json differ - copy strings.json over",
+        not os.path.exists(os.path.join(COMP, "strings.json")),
+        "strings.json ships - a custom integration ships translations/en.json alone",
+    )
+    check(
+        "[%key:" not in read(COMP, "translations", "en.json"),
+        "translations/en.json holds a [%key:...] reference, which ships as literal text",
     )
 
     # ---------------------------------------------------------- actions
@@ -600,7 +604,7 @@ def main() -> int:
     declared_services = set(strings.get("services", {}))
     check(
         declared_services == service_consts,
-        f"strings.json describes {sorted(declared_services)} but const.py "
+        f"translations/en.json describes {sorted(declared_services)} but const.py "
         f"registers {sorted(service_consts)}",
     )
     try:
@@ -618,7 +622,7 @@ def main() -> int:
             check(
                 yaml_fields == described,
                 f"action {name}: services.yaml fields {sorted(yaml_fields)} != "
-                f"strings.json fields {sorted(described)}",
+                f"translations/en.json fields {sorted(described)}",
             )
             for field_spec in (spec or {}).get("fields", {}).values():
                 selector = (field_spec or {}).get("selector", {})
@@ -626,7 +630,7 @@ def main() -> int:
                 if tkey:
                     check(
                         tkey in strings.get("selector", {}),
-                        f"selector translation {tkey!r} missing from strings.json",
+                        f"selector translation {tkey!r} missing from translations/en.json",
                     )
     except ImportError:
         check(
@@ -775,12 +779,12 @@ def main() -> int:
     for step in set(re.findall(r'(?<![a-z_])step_id="([a-z_]+)"', flow_src)):
         check(
             step in config_strings.get("step", {}),
-            f"config flow shows step {step!r} with no strings.json entry",
+            f"config flow shows step {step!r} with no translations/en.json entry",
         )
     for step in config_strings.get("step", {}):
         check(
             f"async_step_{step}(" in flow_src,
-            f"strings.json describes step {step!r} that the flow does not have",
+            f"translations/en.json describes step {step!r} that the flow does not have",
         )
     flow_errors = set(re.findall(r'\{"base": "([a-z_]+)"\}', flow_src)) | set(
         re.findall(r'errors\[[A-Za-z_"]+\] = "([a-z_]+)"', flow_src)
@@ -791,7 +795,7 @@ def main() -> int:
     for error in flow_errors:
         check(
             error in config_strings.get("error", {}),
-            f"config flow returns error {error!r} with no strings.json entry",
+            f"config flow returns error {error!r} with no translations/en.json entry",
         )
     # The three Home Assistant raises itself, whatever the flow says.
     abort_reasons = set(re.findall(r'reason="([a-z_]+)"', flow_src)) | {
@@ -802,12 +806,12 @@ def main() -> int:
     for reason in abort_reasons:
         check(
             reason in config_strings.get("abort", {}),
-            f"config flow aborts with {reason!r} with no strings.json entry",
+            f"config flow aborts with {reason!r} with no translations/en.json entry",
         )
     for reason in config_strings.get("abort", {}):
         check(
             reason in abort_reasons,
-            f"strings.json declares unused abort reason {reason!r}",
+            f"translations/en.json declares unused abort reason {reason!r}",
         )
 
     option_steps = set(re.findall(r'step_id="([a-z_]+)"', options_src))
@@ -818,7 +822,7 @@ def main() -> int:
     for step in option_steps:
         check(
             step in strings.get("options", {}).get("step", {}),
-            f"options flow shows step {step!r} with no strings.json entry",
+            f"options flow shows step {step!r} with no translations/en.json entry",
         )
 
     # ------------------------------------------------------ icon translations
@@ -867,7 +871,7 @@ def main() -> int:
     )
     check(
         declared_exc <= raised,
-        f"strings.json declares unused exceptions {sorted(declared_exc - raised)}",
+        f"translations/en.json declares unused exceptions {sorted(declared_exc - raised)}",
     )
 
     # ----------------------------------------------------- issue translations
@@ -875,7 +879,7 @@ def main() -> int:
     declared_issues = set(strings.get("issues", {}))
     check(
         issue_consts == declared_issues,
-        f"const.py issues {sorted(issue_consts)} != strings.json issues "
+        f"const.py issues {sorted(issue_consts)} != translations/en.json issues "
         f"{sorted(declared_issues)}",
     )
 
