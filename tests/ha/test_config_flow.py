@@ -59,6 +59,7 @@ from tests.ha.conftest import (
     entry_data,
     setup_entry,
 )
+from tests.ha.frontend_form import frontend_submission
 from tests.payloads import REPO
 
 NEW_APP_ID = 5151
@@ -538,7 +539,9 @@ async def test_submitting_the_form_untouched_starts_on_github(
         DOMAIN, context={"source": SOURCE_USER}
     )
     assert list(result["data_schema"].schema) == [CONF_ADVANCED]
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], frontend_submission(result)
+    )
     assert result["type"] is FlowResultType.EXTERNAL_STEP
     client = await hass_client_no_auth()
     page = html.unescape(

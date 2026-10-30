@@ -8,6 +8,10 @@ Everything a user of this integration would notice, newest first. The format fol
 
 - The integration ships `translations/en.json` alone, as Home Assistant's integration marketplace expects, and `hacs.json` carries only the keys it reads.
 
+### Fixed
+
+- Submit on the Connect GitHub screen works with Advanced collapsed. Before, the dialog left the app name and route empty and answered "Not all required fields are filled in."
+
 ## [0.1.6] - 2026-10-29
 
 ### Changed

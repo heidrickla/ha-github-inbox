@@ -195,12 +195,10 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_ROUTE, default=routes[0]): _route_selector(routes),
             }
         )
+        # No default on the section key: the frontend would send that default as
+        # the section's data and never fill in the defaults of the fields inside.
         schema = vol.Schema(
-            {
-                vol.Required(CONF_ADVANCED, default={}): section(
-                    fields, {"collapsed": not errors}
-                )
-            }
+            {vol.Required(CONF_ADVANCED): section(fields, {"collapsed": not errors})}
         )
         if user_input is not None:
             schema = self.add_suggested_values_to_schema(schema, user_input)
