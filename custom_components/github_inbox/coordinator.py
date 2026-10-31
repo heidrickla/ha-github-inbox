@@ -17,6 +17,7 @@ from homeassistant.components import persistent_notification
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -47,12 +48,14 @@ from .const import (
     CONF_INCLUDE_OWN,
     CONF_INSTALLATION_ID,
     CONF_ME,
+    CONF_NOTIFY_CI,
     CONF_NOTIFY_ON,
     CONF_NOTIFY_TARGETS,
     CONF_PERSISTENT,
     DEFAULT_NOTIFY_ON,
     DELIVERY_KEEP,
     DOMAIN,
+    ISSUE_ACTIONS_PERMISSION,
     NOTIFY_DELAY,
     REFRESH_DELAY,
     SIGNAL_UPDATED,
@@ -106,6 +109,8 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._refresh_warned = False
         self.data = self._counts()
         self._gen: dict[str, int] = {}
+        self._ci_gen: dict[str, int] = {}
+        self.ci_permission: dict[str, str] | None = None
         self._refresh_cancel: dict[str, CALLBACK_TYPE] = {}
         self._notes: list[dict[str, Any]] = []
         self._notes_cancel: CALLBACK_TYPE | None = None
@@ -122,6 +127,7 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "installation": self._on_installation,
             "installation_repositories": self._on_installation_repositories,
             "repository": self._on_repository,
+            "workflow_run": self._on_workflow_run,
         }
 
     # ------------------------------------------------------------- state
@@ -140,6 +146,7 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "prs": None,
                 "drafts": None,
                 "unseen": None,
+                "failing_ci": None,
                 "last_delivery": last_delivery,
             }
         items = self.items.values()
@@ -149,6 +156,10 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "prs": sum(1 for i in items if i["kind"] == "pr"),
             "drafts": sum(1 for i in items if i["kind"] == "pr" and i["draft"]),
             "unseen": sum(1 for i in items if model.unseen(i, seen, self.me)),
+            "failing_ci": sum(
+                model.ci_state(v["workflows"]) == "failing"
+                for v in self.store.data["ci"].values()
+            ),
             "last_delivery": last_delivery,
         }
 
@@ -161,6 +172,9 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "seen": self.store.data["seen"],
             "activity": self.store.data["activity"],
             "repos": len(self.store.data["repos"]),
+            "installed": self.store.data["repos"],
+            "ci": self.store.data["ci"],
+            "ci_permission": self.ci_permission,
             "sync": {
                 "entry_id": self.config_entry.entry_id,
                 "state": "lost" if self.installation_lost else self.sync_state,
@@ -246,24 +260,46 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _sync(self) -> None:
         start_gen = dict(self._gen)
+        ci_gen = dict(self._ci_gen)
         live = self.items
+        await self.client.token(force=True)
+        self.check_actions_permission()
         installed = await self.client.repositories()
         names = sorted(
             str(r["full_name"])
             for r in installed.rows
             if r.get("full_name") and not r.get("archived")
         )
+        branches = {
+            str(r["full_name"]): str(r.get("default_branch") or "main")
+            for r in installed.rows
+            if r.get("full_name") and not r.get("archived")
+        }
         # Repositories whose open items were not all read: their stored items stay.
         partial: set[str] = set()
         if not installed.complete:
             listed = set(names)
-            partial |= {i["repo"] for i in live.values() if i["repo"] not in listed}
+            partial |= set(self.store.data["repos"]) - listed
             _LOGGER.warning(
                 "GitHub listed more than %s repositories for %s; items of the rest are kept as stored",
                 len(installed.rows),
                 self.account,
             )
         gate = asyncio.Semaphore(CONCURRENCY)
+
+        async def ci_listing(repo: str) -> tuple[str, dict[str, dict[str, Any]] | None]:
+            branch = branches[repo]
+            if self.client.permissions is None or self.ci_permission is not None:
+                return branch, None
+            async with gate:
+                try:
+                    rows = await self.client.workflow_runs(repo, branch)
+                except (GitHubForbiddenError, GitHubNotFoundError) as err:
+                    _LOGGER.warning("GitHub refused Actions runs for %s: %s", repo, err)
+                    return branch, None
+            return branch, model.ci_workflows(rows, branch)
+
+        ci_lists = await asyncio.gather(*(ci_listing(n) for n in names))
 
         async def listing(repo: str) -> Listing | None:
             async with gate:
@@ -333,10 +369,113 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         seen: dict[str, str] = self.store.data["seen"]
         self.store.data["seen"] = {k: v for k, v in seen.items() if k in result}
         self.store.data["repos"] = sorted(set(names) | partial)
+        current_ci: dict[str, dict[str, Any]] = self.store.data["ci"]
+        next_ci = (
+            dict(current_ci)
+            if not installed.complete
+            else {repo: value for repo, value in current_ci.items() if repo in names}
+        )
+        for repo, (branch, workflows) in zip(names, ci_lists, strict=True):
+            old = current_ci.get(repo, {"workflows": {}})
+            if workflows is None:
+                next_ci[repo] = {**old, "default_branch": branch, "unreadable": True}
+                continue
+            for key, run in old.get("workflows", {}).items():
+                if key in workflows and model.newer_ci_run(run, workflows[key]):
+                    workflows[key] = run
+            if self._ci_gen.get(repo, 0) != ci_gen.get(repo, 0):
+                for key, run in current_ci.get(repo, {}).get("workflows", {}).items():
+                    if key not in workflows or model.newer_ci_run(run, workflows[key]):
+                        workflows[key] = run
+            entry = {
+                **old,
+                "default_branch": branch,
+                "workflows": workflows,
+                "unreadable": False,
+            }
+            next_ci[repo] = entry
+            self._ci_transition(repo, entry, notify=not first)
+        self.store.data["ci"] = next_ci
         self.store.data["last_sync"] = model.iso(dt_util.utcnow())
         for entry in missed:
             self._record(entry)
         self._queue(missed, missed=True)
+
+    def check_actions_permission(self) -> None:
+        permissions = self.client.permissions
+        if permissions is None:
+            return
+        issue_id = f"{ISSUE_ACTIONS_PERMISSION}_{self.config_entry.entry_id}"
+        if permissions.get("actions") in ("read", "write"):
+            self.ci_permission = None
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        slug = self.config_entry.data["app_slug"]
+        installation_id = self.config_entry.data[CONF_INSTALLATION_ID]
+        self.ci_permission = {
+            "settings_url": f"https://github.com/settings/apps/{slug}/permissions",
+            "installation_url": f"https://github.com/settings/installations/{installation_id}",
+        }
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_ACTIONS_PERMISSION,
+            translation_placeholders={"account": self.account, **self.ci_permission},
+        )
+
+    def _ci_transition(
+        self,
+        repo: str,
+        entry: dict[str, Any],
+        *,
+        notify: bool = True,
+    ) -> None:
+        workflows = entry["workflows"]
+        after = model.ci_state(workflows)
+        if after not in ("failing", "passing"):
+            return
+        before = entry.get("settled")
+        failed = entry.get("failed", [])
+        failures = [
+            run
+            for run in workflows.values()
+            if run["status"] == "completed" and run["conclusion"] in model.CI_FAILURES
+        ]
+        entry["settled"] = after
+        entry["failed"] = sorted({run["name"] for run in failures}) if failures else []
+        if (
+            not notify
+            or before is None
+            or before == after
+            or (before != "failing" and after == "passing")
+        ):
+            return
+        source = (
+            failures
+            if after == "failing"
+            else [run for run in workflows.values() if run["name"] in failed]
+        )
+        run = max(
+            source or workflows.values(), key=lambda r: (r["id"], r["updated_at"])
+        )
+        self._queue(
+            [
+                {
+                    "type": "ci_failed" if after == "failing" else "ci_recovered",
+                    "key": repo,
+                    "repo": repo,
+                    "title": ", ".join(
+                        entry["failed"] if after == "failing" else failed
+                    ),
+                    "url": run["html_url"],
+                    "own": False,
+                    "bot": False,
+                }
+            ]
+        )
 
     def _missed(self, old: Item | None, new: Item, since: str) -> list[dict[str, Any]]:
         """Activity a sync found that no webhook delivered."""
@@ -690,6 +829,8 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         repos: list[str] = self.store.data["repos"]
         if old in repos:
             repos[repos.index(old)] = new
+        if old in self.store.data["ci"]:
+            self.store.data["ci"][new] = self.store.data["ci"].pop(old)
 
     def _drop_repo(self, repo: str) -> None:
         for key in [k for k, i in self.items.items() if i["repo"] == repo]:
@@ -697,6 +838,33 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         repos: list[str] = self.store.data["repos"]
         if repo in repos:
             repos.remove(repo)
+        self.store.data["ci"].pop(repo, None)
+
+    def _on_workflow_run(self, p: dict[str, Any]) -> None:
+        repo_obj = p["repository"]
+        repo = str(repo_obj["full_name"])
+        if repo not in self.store.data["repos"]:
+            return
+        stored = self.store.data["ci"]
+        branch = str(
+            stored.get(repo, {}).get("default_branch") or repo_obj["default_branch"]
+        )
+        raw = p["workflow_run"]
+        if raw.get("head_branch") != branch:
+            return
+        run = model.ci_run(raw)
+        key = str(run["workflow_id"])
+        old = stored.get(
+            repo, {"default_branch": branch, "workflows": {}, "unreadable": False}
+        )
+        previous = old["workflows"]
+        if key in previous and not model.newer_ci_run(run, previous[key]):
+            return
+        workflows = {**previous, key: run}
+        entry = {**old, "workflows": workflows}
+        stored[repo] = entry
+        self._ci_gen[repo] = self._ci_gen.get(repo, 0) + 1
+        self._ci_transition(repo, entry)
 
     def _on_installation(self, p: dict[str, Any]) -> None:
         action = p.get("action")
@@ -767,6 +935,8 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _wanted(self, entry: Mapping[str, Any]) -> bool:
         opts = self.config_entry.options
+        if str(entry["type"]).startswith("ci_"):
+            return bool(opts.get(CONF_NOTIFY_CI, True))
         if entry["own"] and not opts.get(CONF_INCLUDE_OWN, False):
             return False
         if entry["bot"] and not opts.get(CONF_INCLUDE_BOTS, False):

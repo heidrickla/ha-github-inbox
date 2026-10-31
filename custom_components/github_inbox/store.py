@@ -20,6 +20,7 @@ def empty() -> dict[str, Any]:
         "activity": [],
         "deliveries": [],
         "repos": [],
+        "ci": {},
         "last_sync": None,
         "last_delivery": None,
     }

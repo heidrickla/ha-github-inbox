@@ -329,6 +329,68 @@ def _age_bucket(created: dt.datetime | None, now: dt.datetime) -> int:
     return len(AGE_BUCKETS) - 1
 
 
+CI_FAILURES = {"failure", "timed_out", "startup_failure"}
+CI_PASSING = {"success", "skipped", "neutral"}
+
+
+def ci_run(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """The fields shown for one workflow's latest default-branch run."""
+    status = str(raw.get("status") or "")
+    if status in ("requested", "waiting", "pending"):
+        status = "queued"
+    return {
+        "workflow_id": int(raw["workflow_id"]),
+        "name": str(raw.get("name") or "Workflow"),
+        "id": int(raw["id"]),
+        "html_url": str(raw.get("html_url") or ""),
+        "status": status,
+        "conclusion": str(raw.get("conclusion") or ""),
+        "head_sha": str(raw.get("head_sha") or ""),
+        "event": str(raw.get("event") or ""),
+        "updated_at": str(raw.get("updated_at") or ""),
+    }
+
+
+def newer_ci_run(new: Mapping[str, Any], old: Mapping[str, Any]) -> bool:
+    return (int(new["id"]), str(new["updated_at"])) > (
+        int(old["id"]),
+        str(old["updated_at"]),
+    )
+
+
+def ci_workflows(
+    rows: Iterable[Mapping[str, Any]], branch: str
+) -> dict[str, dict[str, Any]]:
+    workflows: dict[str, dict[str, Any]] = {}
+    for raw in rows:
+        if (
+            raw.get("head_branch") != branch
+            or not raw.get("workflow_id")
+            or not raw.get("id")
+        ):
+            continue
+        run = ci_run(raw)
+        key = str(run["workflow_id"])
+        if key not in workflows or newer_ci_run(run, workflows[key]):
+            workflows[key] = run
+    return workflows
+
+
+def ci_state(workflows: Mapping[str, Mapping[str, Any]]) -> str:
+    if not workflows:
+        return "no_ci"
+    runs = list(workflows.values())
+    if any(r["status"] == "completed" and r["conclusion"] in CI_FAILURES for r in runs):
+        return "failing"
+    if any(r["status"] in ("queued", "in_progress") for r in runs):
+        return "running"
+    if all(r["status"] == "completed" and r["conclusion"] in CI_PASSING for r in runs):
+        return "passing"
+    if any(r["conclusion"] == "action_required" for r in runs):
+        return "action_required"
+    return "cancelled"
+
+
 def snapshot(accounts: Iterable[Mapping[str, Any]], now: dt.datetime) -> dict[str, Any]:
     """Everything the panel draws, from each account's stored state.
 
@@ -339,6 +401,8 @@ def snapshot(accounts: Iterable[Mapping[str, Any]], now: dt.datetime) -> dict[st
     activity: list[dict[str, Any]] = []
     syncs: list[dict[str, Any]] = []
     repos_installed = 0
+    ci: list[dict[str, Any]] = []
+    ci_permissions: list[dict[str, Any]] = []
     for acc in accounts:
         account = str(acc["account"])
         me: Set[str] = acc["me"]
@@ -346,8 +410,43 @@ def snapshot(accounts: Iterable[Mapping[str, Any]], now: dt.datetime) -> dict[st
             items.append(summary(item, unseen(item, acc["seen"], me), account, me))
         activity += acc["activity"]
         repos_installed += int(acc["repos"])
+        for repo in acc.get("installed", []):
+            stored = acc.get("ci", {}).get(repo, {})
+            workflows = list(stored.get("workflows", {}).values())
+            workflows.sort(
+                key=lambda r: (
+                    r["status"] != "completed" or r["conclusion"] not in CI_FAILURES,
+                    r["name"],
+                )
+            )
+            ci.append(
+                {
+                    "repo": repo,
+                    "account": account,
+                    "default_branch": stored.get("default_branch", ""),
+                    "state": ci_state(stored.get("workflows", {})),
+                    "unreadable": bool(stored.get("unreadable")),
+                    "workflows": workflows,
+                    "newest_at": max((r["updated_at"] for r in workflows), default=""),
+                }
+            )
+        if acc.get("ci_permission"):
+            ci_permissions.append({"account": account, **acc["ci_permission"]})
         syncs.append({"account": account, **acc["sync"]})
     items.sort(key=lambda i: i["updated_at"], reverse=True)
+    ci.sort(
+        key=lambda r: (
+            {
+                "failing": 0,
+                "running": 1,
+                "passing": 2,
+                "cancelled": 3,
+                "action_required": 3,
+                "no_ci": 4,
+            }[r["state"]],
+            r["repo"],
+        )
+    )
 
     by_repo: dict[str, dict[str, Any]] = {}
     ages: list[dict[str, Any]] = [
@@ -426,4 +525,10 @@ def snapshot(accounts: Iterable[Mapping[str, Any]], now: dt.datetime) -> dict[st
         "days": days,
         "recent": recent,
         "sync": syncs,
+        "ci": ci,
+        "ci_totals": {
+            state: sum(r["state"] == state for r in ci)
+            for state in ("failing", "running", "passing")
+        },
+        "ci_permissions": ci_permissions,
     }

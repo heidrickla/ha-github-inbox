@@ -145,3 +145,28 @@ PULL_DETAIL = ("additions", "deletions", "changed_files", "comments", "review_co
 def short_pull(number: int, **kwargs: Any) -> dict[str, Any]:
     """The pull request as review webhooks carry it: GitHub's short form, without counts."""
     return {k: v for k, v in pull(number, **kwargs).items() if k not in PULL_DETAIL}
+
+
+def workflow_run(
+    run_id: int,
+    workflow_id: int = 10,
+    *,
+    repo: str = REPO,
+    branch: str = "main",
+    name: str = "Tests",
+    status: str = "completed",
+    conclusion: str | None = "success",
+    updated: str = "2026-10-30T10:00:00Z",
+) -> dict[str, Any]:
+    return {
+        "id": run_id,
+        "workflow_id": workflow_id,
+        "name": name,
+        "html_url": f"https://github.com/{repo}/actions/runs/{run_id}",
+        "status": status,
+        "conclusion": conclusion,
+        "head_sha": "abc123",
+        "head_branch": branch,
+        "event": "push",
+        "updated_at": updated,
+    }

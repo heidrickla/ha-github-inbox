@@ -33,6 +33,7 @@ from custom_components.github_inbox.const import (
     CONF_INCLUDE_BOTS,
     CONF_INCLUDE_OWN,
     CONF_ME,
+    CONF_NOTIFY_CI,
     CONF_NOTIFY_ON,
     CONF_NOTIFY_TARGETS,
     CONF_ORGANIZATION,
@@ -173,6 +174,7 @@ async def test_the_whole_setup(
     assert manifest["public"] is False
     assert manifest["default_events"] == list(APP_EVENTS)
     assert manifest["default_permissions"] == {
+        "actions": "read",
         "issues": "read",
         "metadata": "read",
         "pull_requests": "read",
@@ -986,6 +988,7 @@ async def test_options_reach_the_running_inbox(
         CONF_NOTIFY_ON: [NOTIFY_OPENED],
         CONF_INCLUDE_BOTS: True,
         CONF_INCLUDE_OWN: True,
+        CONF_NOTIFY_CI: False,
     }
     result = await hass.config_entries.options.async_configure(result["flow_id"], new)
     assert result["type"] is FlowResultType.CREATE_ENTRY

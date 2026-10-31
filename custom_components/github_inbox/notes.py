@@ -51,6 +51,9 @@ def describe(entry: Mapping[str, Any]) -> str:
     """One line: who did what to which item."""
     actor = entry.get("actor") or "someone"
     kind = entry.get("type")
+    if kind in ("ci_failed", "ci_recovered"):
+        word = "failed" if kind == "ci_failed" else "recovered"
+        return f"CI {word} on {entry['repo']}: {entry['title']}"
     if kind in (ACTIVITY_OPENED, ACTIVITY_REOPENED):
         verb = f"{kind} {_noun(entry)}"
     elif kind == ACTIVITY_COMMENTED:
@@ -69,11 +72,19 @@ def _md(text: Any) -> str:
     return _MD_RE.sub(r"\\\1", " ".join(str(text).split()))
 
 
+def _github_url(url: Any) -> str:
+    url = str(url or "")
+    return (
+        url
+        if url.startswith(GITHUB) and not any(c.isspace() or c in "()<>" for c in url)
+        else ""
+    )
+
+
 def _md_link(text: str, url: Any) -> str:
     """A Markdown link to GitHub, or the text alone for any other address."""
-    url = str(url or "")
-    if url.startswith(GITHUB) and not any(c in url for c in "()<> "):
-        return f"[{_md(text)}]({url})"
+    if safe_url := _github_url(url):
+        return f"[{_md(text)}]({safe_url})"
     return _md(text)
 
 
@@ -85,6 +96,17 @@ def compose(notes: Sequence[Mapping[str, Any]], missed: bool = False) -> dict[st
     """Title, message, a Markdown message and the deep link for one notification."""
     if len(notes) == 1:
         entry = notes[0]
+        if str(entry.get("type", "")).startswith("ci_"):
+            title = describe(entry)
+            url = _github_url(entry.get("url"))
+            return {
+                "title": title,
+                "message": f"{entry['repo']}: {entry['title']}"
+                + (f"\n{url}" if url else ""),
+                "markdown": _md_link(title, url),
+                "link": panel_link(),
+                "url": url,
+            }
         title = describe(entry).split(": ", 1)[0]
         body = str(entry.get("title", ""))
         snippet = str(entry.get("preview") or "")
@@ -99,7 +121,15 @@ def compose(notes: Sequence[Mapping[str, Any]], missed: bool = False) -> dict[st
             "link": panel_link(str(entry["key"])),
             "url": str(entry.get("url") or ""),
         }
-    lines = [describe(e) for e in notes[:LIST_LINES]]
+    lines = [
+        describe(e)
+        + (
+            f" {_github_url(e.get('url'))}"
+            if str(e.get("type", "")).startswith("ci_") and _github_url(e.get("url"))
+            else ""
+        )
+        for e in notes[:LIST_LINES]
+    ]
     more = len(notes) - LIST_LINES
     if more > 0:
         lines.append(f"and {more} more")

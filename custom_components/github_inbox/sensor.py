@@ -51,6 +51,12 @@ SENSORS: tuple[InboxSensorDescription, ...] = (
         value=lambda d: d["unseen"],
     ),
     InboxSensorDescription(
+        key="failing_ci",
+        translation_key="failing_ci",
+        state_class=SensorStateClass.MEASUREMENT,
+        value=lambda d: d["failing_ci"],
+    ),
+    InboxSensorDescription(
         key="last_delivery",
         translation_key="last_delivery",
         device_class=SensorDeviceClass.TIMESTAMP,
@@ -83,3 +89,16 @@ class InboxSensor(InboxEntity, SensorEntity):
     @override
     def native_value(self) -> StateType | dt.datetime:
         return self.entity_description.value(self.coordinator.data)
+
+    @property
+    @override
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if self.entity_description.key != "failing_ci":
+            return None
+        return {
+            "repositories": sorted(
+                repo
+                for repo, value in self.coordinator.store.data["ci"].items()
+                if model.ci_state(value["workflows"]) == "failing"
+            )
+        }

@@ -60,6 +60,7 @@ from .const import (
     CONF_INCLUDE_OWN,
     CONF_INSTALLATION_ID,
     CONF_ME,
+    CONF_NOTIFY_CI,
     CONF_NOTIFY_ON,
     CONF_NOTIFY_TARGETS,
     CONF_ORGANIZATION,
@@ -323,6 +324,7 @@ class GitHubInboxConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_NOTIFY_ON: list(DEFAULT_NOTIFY_ON),
                     CONF_INCLUDE_BOTS: False,
                     CONF_INCLUDE_OWN: False,
+                    CONF_NOTIFY_CI: True,
                 },
             )
         targets = _notify_targets(self.hass, [])
@@ -564,6 +566,9 @@ class InboxOptionsFlow(OptionsFlowWithReload):
                 ): BooleanSelector(),
                 vol.Required(
                     CONF_INCLUDE_OWN, default=bool(current.get(CONF_INCLUDE_OWN, False))
+                ): BooleanSelector(),
+                vol.Required(
+                    CONF_NOTIFY_CI, default=bool(current.get(CONF_NOTIFY_CI, True))
                 ): BooleanSelector(),
             }
         )

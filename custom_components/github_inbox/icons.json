@@ -15,6 +15,9 @@
       "unseen": {
         "default": "mdi:email-mark-as-unread"
       },
+      "failing_ci": {
+        "default": "mdi:alert-circle-outline"
+      },
       "last_delivery": {
         "default": "mdi:webhook"
       }

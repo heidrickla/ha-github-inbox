@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect GitHub",
-        "description": "Home Assistant creates a private GitHub App on your account that can only read issues, pull requests and repository metadata. GitHub opens to confirm it, then asks which repositories to install it on. GitHub reaches this Home Assistant through Home Assistant Cloud when you are signed in, otherwise through the external URL.",
+        "description": "Home Assistant creates a private GitHub App on your account that can read issues, pull requests, Actions runs and repository metadata. GitHub opens to confirm it, then asks which repositories to install it on. GitHub reaches this Home Assistant through Home Assistant Cloud when you are signed in, otherwise through the external URL.",
         "sections": {
           "advanced": {
             "name": "Advanced",
@@ -85,14 +85,16 @@
           "persistent_notification": "Home Assistant notification",
           "notify_on": "Notify on",
           "include_bots": "Include bots",
-          "include_own": "Include my own activity"
+          "include_own": "Include my own activity",
+          "notify_ci": "CI notifications"
         },
         "data_description": {
           "me": "Activity by these logins counts as yours: it is never unseen, it ends waiting, and it notifies only with Include my own activity. For an organization's inbox, enter your own login.",
           "notify_targets": "For example the companion app's mobile_app service. A tap opens the inbox at the item.",
           "persistent_notification": "Also post to Home Assistant's notification list.",
           "include_bots": "Dependabot, Renovate and other bot accounts.",
-          "include_own": "Activity by your GitHub logins."
+          "include_own": "Activity by your GitHub logins.",
+          "notify_ci": "Notify when a repository starts failing or recovers to passing, including for your own and bot pushes."
         }
       }
     }
@@ -141,6 +143,9 @@
       "unseen": {
         "name": "Unseen"
       },
+      "failing_ci": {
+        "name": "Failing CI"
+      },
       "last_delivery": {
         "name": "Last delivery"
       }
@@ -170,6 +175,10 @@
     "webhook_route": {
       "title": "GitHub cannot reach the inbox for {account}",
       "description": "The inbox's webhook route is not available: Home Assistant Cloud is signed out or has no subscription, or the external URL is gone. Restore it, or move the webhook with the integration's Reconfigure."
+    },
+    "actions_permission": {
+      "title": "Actions permission needed for {account}",
+      "description": "Open the [GitHub App settings]({settings_url}), add Actions read under Repository permissions, and tick Workflow run under Subscribe to events. Save changes, then open the [installation]({installation_url}) and accept the new permission. Sync GitHub Inbox afterward."
     }
   },
   "services": {

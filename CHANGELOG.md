@@ -2,6 +2,14 @@
 
 Everything a user of this integration would notice, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version numbers are the ones in `manifest.json`.
 
+## [0.1.8] - 2026-10-31
+
+### Added
+
+- GitHub Actions status for every installed repository, with the latest default-branch run of each workflow in the panel and a Failing CI sensor.
+- Notifications when a repository starts failing CI or recovers to passing, with a CI notification option.
+- A repair with GitHub links to add Actions read permission and the Workflow run event subscription to an existing app.
+
 ## [0.1.7] - 2026-10-30
 
 ### Changed

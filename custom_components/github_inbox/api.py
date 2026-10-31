@@ -241,8 +241,10 @@ class GitHubApp:
             "PATCH", "/app/hook/config", {"url": url, "content_type": "json"}
         )
 
-    async def create_token(self, installation_id: int) -> tuple[str, float]:
-        """An installation token and when it expires (epoch seconds)."""
+    async def create_token(
+        self, installation_id: int
+    ) -> tuple[str, float, dict[str, str] | None]:
+        """An installation token, expiry and its granted permissions."""
         try:
             data = await self._call(
                 "POST", f"/app/installations/{int(installation_id)}/access_tokens"
@@ -251,7 +253,13 @@ class GitHubApp:
             # 404 is an installation that is gone, 403 one that is suspended.
             raise GitHubAuthError(str(err)) from err
         try:
-            return str(data["token"]), _parse_time(data["expires_at"])
+            permissions = data.get("permissions")
+            granted = (
+                {str(k): str(v) for k, v in permissions.items()}
+                if isinstance(permissions, dict)
+                else None
+            )
+            return str(data["token"]), _parse_time(data["expires_at"]), granted
         except (KeyError, TypeError) as err:
             raise GitHubConnectionError("the token answer had no token") from err
 
@@ -265,13 +273,20 @@ class InstallationClient:
         self._token: str | None = None
         self._expires = 0.0
         self._lock = asyncio.Lock()
+        self.permissions: dict[str, str] | None = None
 
-    async def token(self) -> str:
+    async def token(self, *, force: bool = False) -> str:
         async with self._lock:
-            if self._token is None or self._expires - TOKEN_MARGIN <= time.time():
-                self._token, self._expires = await self.app.create_token(
-                    self.installation_id
-                )
+            if (
+                force
+                or self._token is None
+                or self._expires - TOKEN_MARGIN <= time.time()
+            ):
+                (
+                    self._token,
+                    self._expires,
+                    self.permissions,
+                ) = await self.app.create_token(self.installation_id)
             return self._token
 
     async def _get(
@@ -332,6 +347,18 @@ class InstallationClient:
 
     async def repositories(self) -> Listing:
         return await self.listing("/installation/repositories", key="repositories")
+
+    async def workflow_runs(self, repo: str, branch: str) -> list[dict[str, Any]]:
+        """The newest 50 default-branch Actions runs, in one response."""
+        path = f"{repo_path(repo)}/actions/runs"
+        data, _ = await self._get(
+            path, {"branch": branch, "per_page": "50"}, ACCEPT_JSON
+        )
+        if not isinstance(data, dict) or not isinstance(
+            data.get("workflow_runs"), list
+        ):
+            raise GitHubConnectionError(f"{path}: the answer has no workflow_runs")
+        return [row for row in data["workflow_runs"] if isinstance(row, dict)]
 
     async def open_issues(self, repo: str) -> Listing:
         """Open issues and pull requests; GitHub lists both as issues."""

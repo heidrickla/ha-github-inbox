@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "github_inbox"
-VERSION: Final = "0.1.7"
+VERSION: Final = "0.1.8"
 NAME: Final = "GitHub Inbox"
 DOCS_URL: Final = "https://github.com/heidrickla/ha-github-inbox"
 
@@ -36,6 +36,7 @@ CONF_PERSISTENT: Final = "persistent_notification"
 CONF_NOTIFY_ON: Final = "notify_on"
 CONF_INCLUDE_BOTS: Final = "include_bots"
 CONF_INCLUDE_OWN: Final = "include_own"
+CONF_NOTIFY_CI: Final = "notify_ci"
 CONF_ME: Final = "me"
 
 NOTIFY_OPENED: Final = "opened"
@@ -48,6 +49,7 @@ DEFAULT_NOTIFY_ON: Final = [NOTIFY_OPENED, NOTIFY_COMMENTS, NOTIFY_REVIEWS]
 SERVICE_RESYNC: Final = "resync"
 
 ISSUE_WEBHOOK_ROUTE: Final = "webhook_route"
+ISSUE_ACTIONS_PERMISSION: Final = "actions_permission"
 
 # The events the GitHub App subscribes to, and the permissions they need.
 APP_EVENTS: Final = (
@@ -57,11 +59,13 @@ APP_EVENTS: Final = (
     "pull_request_review",
     "pull_request_review_comment",
     "repository",
+    "workflow_run",
 )
 APP_PERMISSIONS: Final = {
     "issues": "read",
     "pull_requests": "read",
     "metadata": "read",
+    "actions": "read",
 }
 
 # Activity types, shared by the activity log, the event entity and the panel.

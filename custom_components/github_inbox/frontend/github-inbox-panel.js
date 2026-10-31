@@ -80,6 +80,14 @@ input[type=search]{flex:1;min-width:10rem}
 .tip{position:fixed;z-index:10;pointer-events:none;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:.8rem;
 box-shadow:0 6px 18px rgba(0,0,0,.35);max-width:22rem;white-space:pre-line}
 .err{border-color:var(--crit)}
+.ci-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.ci-row{display:grid;grid-template-columns:6rem minmax(9rem,1fr) minmax(0,2fr) auto;gap:10px;align-items:start;padding:9px 0;border-top:1px solid var(--line)}
+.ci-row:first-child{border-top:0}.ci-row .repo-name{font-weight:600;overflow-wrap:anywhere}.ci-workflows{display:flex;gap:5px 12px;flex-wrap:wrap}
+.ci-workflows a,.ci-permission a{color:var(--s1);text-decoration:none}.ci-workflows a:hover,.ci-permission a:hover{text-decoration:underline}
+.ci-pill{display:inline-flex;justify-content:center;border-radius:10px;padding:2px 8px;background:var(--track);font-size:.78rem;white-space:nowrap}
+.ci-pill.failing{color:var(--crit)}.ci-pill.running{color:var(--warn)}.ci-pill.passing{color:var(--good)}
+.ci-permission{border:1px solid var(--warn);border-radius:8px;padding:10px;margin-bottom:12px}
+@media (max-width:640px){.ci-row{grid-template-columns:auto minmax(0,1fr) auto}.ci-workflows{grid-column:2/-1}.ci-tiles{gap:5px}.ci-tiles .tile{padding:8px}.ci-tiles .tile .ico{display:none}}
 @media (max-width:640px){.wrap{padding:12px}.detail{padding-left:6px}.row{grid-template-columns:12px 18px minmax(0,1fr)}.side{grid-column:3}.brow{grid-template-columns:minmax(5rem,8rem) 1fr 1.6rem}}
 `;
 
@@ -109,6 +117,7 @@ const esc = (v) =>
   String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const cv = (name) => `var(${name})`;
 const short = (repo) => String(repo).split("/").pop();
+const githubLink = (url) => /^https:\/\/github\.com\/[A-Za-z0-9_.\/-]+$/.test(String(url || "")) ? String(url) : "";
 
 function ago(iso, now = Date.now()) {
   const t = Date.parse(iso);
@@ -240,7 +249,7 @@ class GitHubInboxPanel extends HTMLElement {
 
   connectedCallback() {
     if (this._hass && !this._unsub) this._subscribe();
-    this._ticker = setInterval(() => this._renderStatus(), 30000);
+    this._ticker = setInterval(() => { this._renderStatus(); this._renderCI(); }, 30000);
   }
   disconnectedCallback() {
     clearInterval(this._ticker);
@@ -270,6 +279,7 @@ class GitHubInboxPanel extends HTMLElement {
 <div class="actions"><button data-act="sync" data-tip="Read every open item from GitHub again">Sync now</button>
 <button data-act="seen-all">Mark all seen</button><button data-act="theme" id="theme"></button></div></header>
 <section class="tiles" id="tiles"></section>
+<section class="card wide" id="ci"><h2>GitHub Actions CI</h2><div id="ci-content"></div></section>
 <section class="grid" id="charts"></section>
 <section class="card wide" id="listcard"><h2><span>Open issues and pull requests</span><small id="count"></small></h2>
 <div class="toolbar"><div class="seg" id="seg"></div>
@@ -358,6 +368,7 @@ class GitHubInboxPanel extends HTMLElement {
   _render() {
     this._renderStatus();
     this._renderTiles();
+    this._renderCI();
     this._renderCharts();
     this._renderToolbar();
     this._renderList();
@@ -428,6 +439,30 @@ class GitHubInboxPanel extends HTMLElement {
         oldest ? btn("goto", `Open ${oldest.key}`, ` data-key="${esc(oldest.key)}"`) : ""),
       tile(G.pulse(cv("--s4")), "Activity, 7 days", t.activity_7d, "", spark, btn("recent", "Go to recent activity")),
     ].join("");
+  }
+
+  _renderCI() {
+    const el = this.shadowRoot.getElementById("ci-content");
+    const snap = this._snap;
+    if (!snap) { el.innerHTML = ""; return; }
+    const counts = snap.ci_totals || {};
+    const tiles = [["Failing CI", "failing", "--crit"], ["Running", "running", "--warn"], ["Passing", "passing", "--good"]]
+      .map(([label, state, color]) => `<div class="tile"><span class="dot" style="background:var(${color})"></span><div class="txt"><div class="k">${label}</div><div class="v">${Number(counts[state] || 0)}</div></div></div>`).join("");
+    const permissions = (snap.ci_permissions || []).map((p) => {
+      const settings = githubLink(p.settings_url), installation = githubLink(p.installation_url);
+      return `<div class="ci-permission">${esc(p.account)}: Open the ${settings ? `<a href="${esc(settings)}" target="_blank" rel="noopener noreferrer">GitHub App settings</a>` : "GitHub App settings"} and add Actions read under Repository permissions and tick Workflow run under Subscribe to events. Then open the ${installation ? `<a href="${esc(installation)}" target="_blank" rel="noopener noreferrer">installation</a>` : "installation"} and accept the new permission. Sync GitHub Inbox afterward.</div>`;
+    }).join("");
+    const labels = {failing: "Failing", running: "Running", passing: "Passing", no_ci: "No CI", cancelled: "Cancelled", action_required: "Action required"};
+    const rows = (snap.ci || []).map((r) => {
+      const workflows = (r.workflows || []).map((w) => {
+        const link = githubLink(w.html_url);
+        const word = w.status === "completed" ? w.conclusion : w.status;
+        const title = `${w.name} (${String(word || "unknown").replaceAll("_", " ")})`;
+        return link ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer">${esc(title)}</a>` : `<span>${esc(title)}</span>`;
+      }).join("");
+      return `<div class="ci-row"><span class="ci-pill ${esc(r.state)}">${esc(labels[r.state] || r.state)}</span><span class="repo-name">${esc(r.repo)}${r.unreadable ? ` <span class="muted small">(unreadable)</span>` : ""}</span><span class="ci-workflows">${workflows || `<span class="muted">No runs</span>`}</span><span class="muted small">${r.newest_at ? esc(ago(r.newest_at)) : "-"}</span></div>`;
+    }).join("");
+    el.innerHTML = `${permissions}<div class="ci-tiles">${tiles}</div>${rows || `<div class="muted small">No installed repositories.</div>`}`;
   }
 
   _markTiles() {

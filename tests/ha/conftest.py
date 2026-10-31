@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from collections.abc import Generator, Iterable
+from collections.abc import Generator, Iterable, Mapping
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -137,11 +137,19 @@ class GitHub:
     def reset(self) -> None:
         self.m.clear_requests()
 
-    def token(self, status: int = 201) -> None:
+    def token(
+        self, status: int = 201, permissions: dict[str, str] | None = None
+    ) -> None:
         self.m.post(
             f"{API}/app/installations/{INSTALLATION_ID}/access_tokens",
             status=status,
-            json={"token": "ghs_test", "expires_at": "2099-01-01T00:00:00Z"},
+            json={
+                "token": "ghs_test",
+                "expires_at": "2099-01-01T00:00:00Z",
+                "permissions": permissions
+                if permissions is not None
+                else {"actions": "read"},
+            },
         )
 
     def repos(
@@ -149,9 +157,10 @@ class GitHub:
         names: Iterable[str] = (REPO,),
         status: int = 200,
         archived: Iterable[str] = (),
+        runs_by_repo: Mapping[str, list[dict[str, Any]]] | None = None,
     ) -> None:
         rows: list[dict[str, Any]] = [
-            {"full_name": n, "archived": False} for n in names
+            {"full_name": n, "archived": False, "default_branch": "main"} for n in names
         ]
         rows += [{"full_name": n, "archived": True} for n in archived]
         rows.append({"archived": False})
@@ -159,6 +168,21 @@ class GitHub:
             f"{API}/installation/repositories",
             status=status,
             json={"total_count": len(rows), "repositories": rows},
+        )
+        for row in rows:
+            if row.get("full_name") and not row.get("archived"):
+                self.runs(
+                    (runs_by_repo or {}).get(row["full_name"], []),
+                    repo=row["full_name"],
+                )
+
+    def runs(
+        self, rows: list[dict[str, Any]], repo: str = REPO, status: int = 200
+    ) -> None:
+        self.m.get(
+            f"{API}/repos/{repo}/actions/runs",
+            status=status,
+            json={"workflow_runs": rows},
         )
 
     def issues(

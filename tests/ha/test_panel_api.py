@@ -68,6 +68,9 @@ async def test_subscribe_sends_a_snapshot_now_and_once_per_burst(
     first = (await ws.receive_json())["event"]["snapshot"]
     assert first["totals"]["issues"] == 2
     assert first["totals"]["unseen"] == 2
+    assert first["ci_totals"] == {"failing": 0, "running": 0, "passing": 0}
+    assert first["ci"][0]["repo"] == REPO
+    assert first["ci"][0]["workflows"] == []
     assert [s["state"] for s in first["sync"]] == ["ok"]
     assert {i["key"] for i in first["items"]} == {KEY, f"{REPO}#3"}
 
@@ -246,6 +249,7 @@ async def test_diagnostics_redact_the_secrets(
     assert diag["entry"]["data"]["private_key"] == "**REDACTED**"
     assert diag["counts"]["issues"] == 2
     assert diag["counts"]["repositories"] == 1
+    assert diag["counts"]["ci"]["no_ci"] == 1
     assert diag["sync"]["state"] == "ok"
     assert "ATX buttons" not in text
 

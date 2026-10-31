@@ -20,6 +20,7 @@ from .const import (
     CONF_PRIVATE_KEY,
     CONF_WEBHOOK_ID,
     DOMAIN,
+    ISSUE_ACTIONS_PERMISSION,
     ISSUE_WEBHOOK_ROUTE,
     SIGNAL_UPDATED,
 )
@@ -64,6 +65,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: InboxConfigEntry) -> boo
     store = InboxStore(hass, entry.entry_id)
     await store.async_load()
     coordinator = InboxCoordinator(hass, entry, client, store)
+    coordinator.check_actions_permission()
     entry.runtime_data = coordinator
 
     try:
@@ -144,3 +146,4 @@ async def async_remove_entry(hass: HomeAssistant, entry: InboxConfigEntry) -> No
         await route.async_delete_cloudhook(hass, entry.data[CONF_WEBHOOK_ID])
     await InboxStore(hass, entry.entry_id).async_remove()
     ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_WEBHOOK_ROUTE}_{entry.entry_id}")
+    ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_ACTIONS_PERMISSION}_{entry.entry_id}")

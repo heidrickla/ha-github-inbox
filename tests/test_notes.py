@@ -5,6 +5,35 @@ from __future__ import annotations
 from custom_components.github_inbox import notes
 
 
+def test_ci_notification_escapes_workflow_and_links_only_to_github() -> None:
+    entry = {
+        "type": "ci_failed",
+        "key": "owner/repo",
+        "repo": "owner/repo",
+        "title": "Build [unsafe](https://evil.example)",
+        "url": "https://github.com/owner/repo/actions/runs/42",
+    }
+    note = notes.compose([entry])
+    assert "owner/repo" in note["title"]
+    assert "Build \\[unsafe\\]" in note["markdown"]
+    assert note["markdown"].endswith("](https://github.com/owner/repo/actions/runs/42)")
+    entry["url"] = "https://evil.example/run"
+    assert notes.compose([entry])["url"] == ""
+
+
+def test_ci_in_a_batch_keeps_the_run_link() -> None:
+    ci = {
+        "type": "ci_failed",
+        "key": "owner/repo",
+        "repo": "owner/repo",
+        "title": "Build",
+        "url": "https://github.com/owner/repo/actions/runs/42",
+    }
+    batch = notes.compose([ci, {**ci, "type": "ci_recovered", "key": "owner/other"}])
+    assert "https://github.com/owner/repo/actions/runs/42" in batch["message"]
+    assert "[CI failed on owner/repo" in batch["markdown"]
+
+
 def entry(type_: str = "opened", **extra):
     return {
         "type": type_,

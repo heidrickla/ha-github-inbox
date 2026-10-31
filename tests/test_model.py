@@ -4,8 +4,64 @@ from __future__ import annotations
 
 import datetime as dt
 
+import pytest
+
 from custom_components.github_inbox import model
-from tests.payloads import comment, issue, pull, review, review_comment, short_pull
+from tests.payloads import (
+    comment,
+    issue,
+    pull,
+    review,
+    review_comment,
+    short_pull,
+    workflow_run,
+)
+
+
+@pytest.mark.parametrize(
+    ("status", "conclusion", "expected"),
+    [
+        ("completed", "failure", "failing"),
+        ("completed", "timed_out", "failing"),
+        ("completed", "startup_failure", "failing"),
+        ("queued", None, "running"),
+        ("waiting", None, "running"),
+        ("in_progress", None, "running"),
+        ("completed", "success", "passing"),
+        ("completed", "skipped", "passing"),
+        ("completed", "neutral", "passing"),
+        ("completed", "cancelled", "cancelled"),
+        ("completed", "action_required", "action_required"),
+    ],
+)
+def test_ci_state_for_each_run_result(
+    status: str, conclusion: str | None, expected: str
+) -> None:
+    run = model.ci_run(workflow_run(1, status=status, conclusion=conclusion))
+    assert model.ci_state({"10": run}) == expected
+
+
+def test_ci_aggregation_and_latest_per_workflow() -> None:
+    rows = [
+        workflow_run(4),
+        workflow_run(5, branch="feature"),
+        workflow_run(3, conclusion="failure"),
+        workflow_run(2, workflow_id=20, conclusion="cancelled"),
+    ]
+    workflows = model.ci_workflows(rows, "main")
+    assert {key: run["id"] for key, run in workflows.items()} == {"10": 4, "20": 2}
+    assert model.ci_state(workflows) == "cancelled"
+    assert model.ci_state({}) == "no_ci"
+    assert (
+        model.ci_state(
+            {
+                "10": model.ci_run(workflow_run(3, conclusion="failure")),
+                "20": model.ci_run(workflow_run(9, status="queued", conclusion=None)),
+            }
+        )
+        == "failing"
+    )
+
 
 NOW = dt.datetime(2026, 10, 23, 12, 0, tzinfo=dt.UTC)
 REPO = "heidrickla/ha-glkvm"

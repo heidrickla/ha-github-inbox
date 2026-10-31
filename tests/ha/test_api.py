@@ -35,6 +35,29 @@ from tests.payloads import REPO
 TOKEN_PATH = f"{API}/app/installations/{INSTALLATION_ID}/access_tokens"
 
 
+async def test_actions_runs_use_default_branch_and_token_permissions(
+    session: aiohttp.ClientSession, aioclient_mock: AiohttpClientMocker, pem: str
+) -> None:
+    aioclient_mock.post(
+        TOKEN_PATH,
+        status=201,
+        json={
+            "token": "ghs_a",
+            "expires_at": "2099-01-01T00:00:00Z",
+            "permissions": {"actions": "read", "metadata": "read"},
+        },
+    )
+    path = f"{API}/repos/{REPO}/actions/runs"
+    aioclient_mock.get(path, json={"workflow_runs": [{"id": 3}]})
+    c = client(session, pem)
+    assert await c.workflow_runs(REPO, "main") == [{"id": 3}]
+    assert c.permissions == {"actions": "read", "metadata": "read"}
+    assert aioclient_mock.mock_calls[-1][1].query == {
+        "branch": "main",
+        "per_page": "50",
+    }
+
+
 @pytest.fixture
 async def session(
     hass: HomeAssistant, aioclient_mock: AiohttpClientMocker

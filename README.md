@@ -1,6 +1,6 @@
 # GitHub Inbox for Home Assistant
 
-Open issues and pull requests across your GitHub repositories, in a Home Assistant sidebar panel, with each comment and review collapsed to one line until you open it. GitHub pushes every change to Home Assistant through a webhook, so nothing polls. New issues, pull requests, comments and reviews can also notify your phone.
+Open issues, pull requests and GitHub Actions CI across your GitHub repositories, in a Home Assistant sidebar panel, with each comment and review collapsed to one line until you open it. GitHub pushes every change to Home Assistant through a webhook, so nothing polls. New activity and CI failures or recoveries can also notify your phone.
 
 The integration creates a private GitHub App for your account from inside the config flow. GitHub hands the app's key and webhook secret to Home Assistant once; the setup asks for nothing to be typed.
 
@@ -30,6 +30,7 @@ GitHub Inbox in the sidebar, for administrators. Dark by default, with a light t
 | The list | Every open item: title, number, repository, author, labels, age, the last word, `+additions −deletions` for pull requests and the comment count. Filter by kind, unseen or waiting; pick a repository; search; sort. |
 | An open item | The description, then the timeline: every comment, review and line comment as one line (author, verb or review state, preview, time) that expands on click. Expand all, Collapse all, Open on GitHub. Opening an item marks it seen. |
 | Recent activity | The newest 25 events across all repositories. |
+| GitHub Actions CI | Failing, running and passing counts, then every installed repository with its latest default-branch run per workflow. |
 
 An item is unseen when someone other than you has written on it since you last opened it. It is waiting on you when the last comment or review is someone else's. You are the logins in the Your GitHub logins option.
 
@@ -44,6 +45,7 @@ One service device per GitHub account.
 | Open issues | sensor | Open issues across the installed repositories. |
 | Open pull requests | sensor | Open pull requests, drafts included. |
 | Unseen | sensor | Items with activity from others since you last opened them. |
+| Failing CI | sensor | Number of installed repositories with a failing latest workflow run; full repository names are an attribute. |
 | Activity | event | Fires for every event: `opened`, `reopened`, `closed`, `merged`, `commented`, `reviewed`. Attributes: `repo`, `number`, `kind` (`issue` or `pr`), `title`, `url`, `actor`, `bot`, `own`, `state` (the review state). |
 | Last delivery | sensor (diagnostic, disabled by default) | When GitHub last delivered a webhook. |
 
@@ -51,7 +53,7 @@ The entities are unavailable after a failed sync and while GitHub reports the ap
 
 ### Notifications
 
-New activity goes to the notify services you choose and, optionally, to a persistent notification. Events within 5 seconds of each other become one message ("3 updates in your repositories"). Each message is its own card in Home Assistant's notification list. On the Home Assistant Companion app a notification opens the item in the panel and carries an Open on GitHub action. Your own activity and bots' are left out unless you turn them on.
+New activity goes to the notify services you choose and, optionally, to a persistent notification. Events within 5 seconds of each other become one message ("3 updates in your repositories"). Each message is its own card in Home Assistant's notification list. On the Home Assistant Companion app a notification opens the panel and carries an Open on GitHub action. Your own and bot activity is left out unless you turn it on. CI failure and recovery notifications include the workflow run link regardless of who pushed; the CI notifications option is on by default.
 
 ### Actions
 
@@ -85,7 +87,7 @@ Without the buttons: HACS, the three-dot menu, Custom repositories, add `https:/
 
 From the Home Assistant app, the GitHub pages open in the phone's browser at another of Home Assistant's addresses: the Home Assistant Cloud address while the app uses the local one, the local address otherwise. On Android the create and install pages first open an `intent:` address that no app handles, so the browser keeps GitHub's pages and does not pass them to the GitHub app.
 
-The first sync reads every open issue and pull request; the panel fills as it completes.
+The first sync reads every open issue, pull request and repository's latest default-branch Actions runs; the panel fills as it completes.
 
 A setup that is closed, or cut off by a restart, leaves no cloudhook behind: the integration records each cloudhook it makes and deletes those no entry or open setup uses, at startup and whenever a setup opens.
 
@@ -97,7 +99,7 @@ A setup that is closed, or cut off by a restart, leaves no cloudhook behind: the
 | Organization | An organization's login to create the app under it, for that organization's repositories. Blank for your personal account. |
 | Webhook route | Home Assistant Cloud or the external URL. Only the routes available now are offered. |
 
-The app is private, read-only (issues, pull requests, metadata), and subscribed to issues, issue comments, pull requests, reviews, review comments and repository events.
+The app is private, read-only (issues, pull requests, Actions and metadata), and subscribed to issues, issue comments, pull requests, reviews, review comments, repository and workflow run events.
 
 ### Configuration parameters
 
@@ -110,6 +112,7 @@ Settings, Devices & services, GitHub Inbox, Configure:
 | Notify on | new and reopened items, comments, reviews | Which events notify. Closed and merged is the fourth choice. |
 | Include bots | off | Notify for activity by bots such as Dependabot. |
 | Include my own activity | off | Notify for activity by your GitHub logins. |
+| CI notifications | on | Notify when a repository starts failing CI or recovers to passing. |
 | Your GitHub logins | the account | The logins counted as you for own activity, unseen and waiting. For an organization's inbox, add your personal login. |
 
 Saving reloads the inbox with the new options.
@@ -131,7 +134,7 @@ Home Assistant asks for re-authentication when GitHub stops accepting the app's 
 
 GitHub delivers each change to the webhook as it happens. Each delivery is checked against the app's webhook secret before it is read, and applied at once; a few seconds later the item is read from GitHub for its rendered text and full timeline.
 
-A full sync runs at setup, on the resync action and the panel's Sync now, after Home Assistant Cloud reconnects, and when repositories are added to the installation or renamed. It reads only the items that changed since the stored copy, and notifies once for anything it found that no webhook delivered. A repository GitHub refuses to list, or a listing cut short, keeps its stored items until a later sync reads it in full. A failed sync retries after 5, 15 and then 60 minutes.
+A full sync runs at setup, on the resync action and the panel's Sync now, after Home Assistant Cloud reconnects, and when repositories are added to the installation or renamed. It reads only the items that changed since the stored copy, plus the latest 50 default-branch Actions runs per repository, and notifies once for anything it found that no webhook delivered. A repository GitHub refuses to list, or a listing cut short, keeps its stored items until a later sync reads it in full. An unreadable Actions listing keeps that repository's stored CI. A failed sync retries after 5, 15 and then 60 minutes.
 
 Activity on a closed issue or a merged pull request does not return it to the list. A renamed repository keeps its items, seen marks and activity under the new name.
 
@@ -202,6 +205,7 @@ A dashboard badge for unseen items: add `sensor.github_heidrickla_unseen` as a b
 | GitHub refuses the app name | Another app has it. Go back and choose another. |
 | GitHub says it didn't find an App Manifest | The create page opened in a browser other than the one that sent the app's description. Start the setup again; if the phone asks which app opens GitHub, choose the browser the page opened in. From the Home Assistant app, Home Assistant needs a second address (Home Assistant Cloud or a local URL). |
 | Last delivery is old | Enable the Last delivery sensor; compare it with GitHub's Recent Deliveries. |
+| Actions permission needed | Follow the repair's GitHub App settings link, add Actions read under Repository permissions, tick Workflow run under Subscribe to events, and save. Then accept the new permission on the installation and Sync now. |
 
 Diagnostics (the integration's three dots, Download diagnostics) carry the sync state and counts, with the key, the webhook secret, the webhook id and the notify services redacted, and no titles or bodies.
 

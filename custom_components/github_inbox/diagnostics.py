@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
+from . import model
 from .const import (
     CONF_NOTIFY_TARGETS,
     CONF_PRIVATE_KEY,
@@ -44,5 +45,22 @@ async def async_get_config_entry_diagnostics(
             "items": len(stored["items"]),
             "activity": len(stored["activity"]),
             "deliveries_remembered": len(stored["deliveries"]),
+            "ci": {
+                state: sum(
+                    model.ci_state(value["workflows"]) == state
+                    for value in stored["ci"].values()
+                )
+                for state in (
+                    "failing",
+                    "running",
+                    "passing",
+                    "no_ci",
+                    "cancelled",
+                    "action_required",
+                )
+            },
+            "ci_unreadable": sum(
+                bool(value.get("unreadable")) for value in stored["ci"].values()
+            ),
         },
     }
