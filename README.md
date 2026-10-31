@@ -225,7 +225,7 @@ python -m mypy custom_components/github_inbox
 python tools/validate_local.py
 ```
 
-`tools/make_brand.py` draws the brand images in `custom_components/github_inbox/brand/` and checks them against Home Assistant's rules.
+`tools/make_brand.py` scales `brand/icon-source.png`, draws the wide logos in `custom_components/github_inbox/brand/`, and checks the outputs against Home Assistant's rules.
 
 | Module | Role |
 |---|---|

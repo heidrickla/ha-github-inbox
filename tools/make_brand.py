@@ -10,9 +10,7 @@ Sizes:
     logo.png       shortest side 128-256
     logo@2x.png    shortest side 256-512
 
-The canvas is transparent and the mark fills it but for a few percent of padding. The mark is what the integration
-is: an inbox tray with an open issue and a pull request dropping into it, in the panel's issue and pull request
-colours.
+The icons use brand/icon-source.png. The wide logos retain the tray and issue marks.
 """
 
 from __future__ import annotations
@@ -108,8 +106,18 @@ def main() -> None:
         "logo.png": (512, 256),
         "logo@2x.png": (1024, 512),
     }
+    source = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "brand", "icon-source.png"
+    )
+    with Image.open(source) as original:
+        approved_icon = original.convert("RGBA")
     for name, size in specs.items():
-        draw(size, pad_frac=PAD_FRAC).save(os.path.join(out, name), "PNG")
+        image = (
+            approved_icon.resize(size, Image.LANCZOS)
+            if name.startswith("icon")
+            else draw(size, pad_frac=PAD_FRAC)
+        )
+        image.save(os.path.join(out, name), "PNG")
         print(f"  {name:14s} {size[0]}x{size[1]}")
 
     # Checked against the published rules: the sizes, a transparent background (the corners), and a mark that
