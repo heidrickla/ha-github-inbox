@@ -4,27 +4,29 @@
 
 const STYLE = `
 :host{display:block;height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch}
-.wrap{--bg:#111418;--card:#181c21;--line:#2c3138;--track:#232830;--text:#e3e6ea;--muted:#9aa3ad;--faint:#5f6b78;
+.wrap{--bg:#0d0d0d;--card:#1a1a19;--line:#2c2c2a;--track:#222220;--text:#f0efec;--muted:#c3c2b7;--faint:#898781;
 --s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300;--good:#0ca30c;--warn:#fab219;--crit:#d03b3b;
---code:#0d1014;--hover:#1f242b;color-scheme:dark;background:var(--bg);color:var(--text);min-height:100%;box-sizing:border-box;
-padding:16px;font:14px/1.45 var(--paper-font-body1_-_font-family,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif)}
-.wrap[data-theme=light]{--bg:#f4f5f7;--card:#fff;--line:#d9dde3;--track:#eceff3;--text:#1b1f24;--muted:#57606a;--faint:#8c959f;
---s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300;--code:#f6f8fa;--hover:#f0f3f6;color-scheme:light}
+--code:#111110;--hover:#262624;color-scheme:dark;background:var(--bg);color:var(--text);min-height:100%;box-sizing:border-box;
+padding:24px;font:14px/1.45 var(--paper-font-body1_-_font-family,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif)}
+.wrap[data-theme=light]{--bg:#f9f9f7;--card:#fcfcfb;--line:#e1e0d9;--track:#f0efec;--text:#0b0b0b;--muted:#52514e;--faint:#898781;
+--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300;--code:#f4f4f1;--hover:#f0efec;color-scheme:light}
 *{box-sizing:border-box}main{max-width:80rem;margin:0 auto}
 button{font:inherit;color:var(--text);background:var(--track);border:1px solid var(--line);border-radius:8px;padding:5px 12px;cursor:pointer}
-button:hover{border-color:var(--faint)}button:focus-visible,[tabindex]:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+button:hover{border-color:var(--s1)}button:focus-visible,[tabindex]:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(--s1);outline-offset:2px}
 select,input{font:inherit;color:var(--text);background:var(--track);border:1px solid var(--line);border-radius:8px;padding:5px 10px}
 input[type=search]{flex:1;min-width:10rem}
-.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}.top h1{font-size:1.45rem;margin:0;font-weight:600}
-.brand{display:flex;align-items:center;gap:10px}.status{display:flex;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:.85rem}
+.top{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px}.top h1{font-size:1.9rem;margin:1px 0 0;font-weight:700;letter-spacing:-.035em;line-height:1.15}
+.brand{display:flex;align-items:center;gap:12px}.brand svg{flex:none}.eyebrow{display:block;color:var(--faint);font-size:.72rem;text-transform:uppercase;letter-spacing:.12em;font-weight:700}.lede{margin:4px 0 0;color:var(--muted);font-size:.88rem}
+.statusline{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 16px;margin-bottom:16px}.statusline>strong{font-size:.85rem}.status{display:flex;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:.85rem}
 .actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(10.5rem,1fr));gap:10px}
-.tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 14px;display:flex;gap:12px;align-items:center;min-width:0}
-.tile .k{color:var(--muted);font-size:.8rem}.tile .v{font-size:1.5rem;font-weight:600;line-height:1.15}.tile .sub{color:var(--muted);font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tiles{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px}
+.tiles>.tile{grid-column:span 3}.tiles>.tile:nth-child(n+5){grid-column:span 4}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;gap:12px;align-items:center;min-width:0;text-align:left;width:100%}
+.tile .k{color:var(--faint);font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}.tile .v{font-size:1.9rem;font-weight:700;letter-spacing:-.04em;line-height:1.15;font-variant-numeric:tabular-nums}.tile .sub{color:var(--muted);font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tile .txt{min-width:0;flex:1}.tile .ico{flex:none;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--track)}
-.tile[data-act]{cursor:pointer}.tile[data-act]:hover{border-color:var(--faint);background:var(--hover)}.tile[aria-pressed=true]{border-color:var(--s1);box-shadow:inset 0 0 0 1px var(--s1)}
+.tile[data-act]{cursor:pointer}.tile[data-act]:hover{border-color:var(--s1);background:var(--hover)}.tile[aria-pressed=true]{border-color:var(--s1);box-shadow:inset 3px 0 0 var(--s1)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(21rem,1fr));gap:12px;margin-top:12px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:0}.card.wide{grid-column:1/-1;margin-top:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;min-width:0}.card.wide{grid-column:1/-1;margin-top:16px}
 .card h2{font-size:1rem;margin:0 0 10px;font-weight:600;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
 .card h2 small{color:var(--muted);font-weight:400;font-size:.8rem}
 .muted{color:var(--muted)}.small{font-size:.82rem}
@@ -80,7 +82,7 @@ input[type=search]{flex:1;min-width:10rem}
 .tip{position:fixed;z-index:10;pointer-events:none;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:.8rem;
 box-shadow:0 6px 18px rgba(0,0,0,.35);max-width:22rem;white-space:pre-line}
 .err{border-color:var(--crit)}
-.ci-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.ci-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:16px}.ci-tiles .tile{background:var(--track);min-height:86px}
 .ci-row{display:grid;grid-template-columns:6rem minmax(9rem,1fr) minmax(0,2fr) auto;gap:10px;align-items:start;padding:9px 0;border-top:1px solid var(--line)}
 .ci-row:first-child{border-top:0}.ci-row .repo-name{font-weight:600;overflow-wrap:anywhere}.ci-workflows{display:flex;gap:5px 12px;flex-wrap:wrap}
 .ci-workflows a,.ci-permission a{color:var(--s1);text-decoration:none}.ci-workflows a:hover,.ci-permission a:hover{text-decoration:underline}
@@ -88,7 +90,9 @@ box-shadow:0 6px 18px rgba(0,0,0,.35);max-width:22rem;white-space:pre-line}
 .ci-pill.failing{color:var(--crit)}.ci-pill.running{color:var(--warn)}.ci-pill.passing{color:var(--good)}
 .ci-permission{border:1px solid var(--warn);border-radius:8px;padding:10px;margin-bottom:12px}
 @media (max-width:640px){.ci-row{grid-template-columns:auto minmax(0,1fr) auto}.ci-workflows{grid-column:2/-1}.ci-tiles{gap:5px}.ci-tiles .tile{padding:8px}.ci-tiles .tile .ico{display:none}}
-@media (max-width:640px){.wrap{padding:12px}.detail{padding-left:6px}.row{grid-template-columns:12px 18px minmax(0,1fr)}.side{grid-column:3}.brow{grid-template-columns:minmax(5rem,8rem) 1fr 1.6rem}}
+@media (max-width:900px){.tiles>.tile{grid-column:span 6}.tiles>.tile:nth-child(n+5){grid-column:span 4}}
+@media (max-width:640px){.wrap{padding:14px}.tiles>.tile,.tiles>.tile:nth-child(n+5){grid-column:span 6}.card{padding:16px}.detail{padding-left:6px}.row{grid-template-columns:12px 18px minmax(0,1fr)}.side{grid-column:3}.brow{grid-template-columns:minmax(5rem,8rem) 1fr 1.6rem}.ci-tiles .tile{padding:10px}.top{align-items:flex-start}}
+@media (max-width:420px){.tiles>.tile:nth-child(n+5){grid-column:span 12}.ci-tiles{grid-template-columns:1fr}.ci-tiles .tile{min-height:0}.actions{margin-left:0}.top h1{font-size:1.6rem}}
 `;
 
 const AGE_LABELS = ["< 1 day", "< 1 week", "< 1 month", "< 3 months", "< 1 year", "older"];
@@ -274,10 +278,10 @@ class GitHubInboxPanel extends HTMLElement {
     const root = this.shadowRoot;
     root.innerHTML = `<style>${STYLE}</style>
 <div class="wrap" data-theme="${this._theme}"><main>
-<header class="top"><span id="menu"></span><div class="brand">${LOGO}<h1>GitHub Inbox</h1></div>
-<div class="status" id="status"></div>
+<header class="top"><span id="menu"></span><div class="brand">${LOGO}<div><span class="eyebrow">Repository activity</span><h1>GitHub Inbox</h1><p class="lede">Issues, pull requests and CI across your repositories</p></div></div>
 <div class="actions"><button data-act="sync" data-tip="Read every open item from GitHub again">Sync now</button>
 <button data-act="seen-all">Mark all seen</button><button data-act="theme" id="theme"></button></div></header>
+<div class="statusline" role="status"><strong>Connection and freshness</strong><div class="status" id="status"></div></div>
 <section class="tiles" id="tiles"></section>
 <section class="card wide" id="ci"><h2>GitHub Actions CI</h2><div id="ci-content"></div></section>
 <section class="grid" id="charts"></section>
@@ -384,7 +388,7 @@ class GitHubInboxPanel extends HTMLElement {
     const el = this.shadowRoot.getElementById("status");
     if (!el) return;
     if (this._error) {
-      el.innerHTML = `<span class="chip"><span class="dot" style="background:var(--crit)"></span>${esc(this._error)}</span>`;
+      el.innerHTML = `<span class="chip"><span class="dot" style="background:var(--crit)"></span>${esc(this._error)}</span><span class="muted small">${this._snap ? "Last snapshot retained; data may be stale" : "Inbox unavailable"}</span>`;
       return;
     }
     const snap = this._snap;
@@ -411,7 +415,9 @@ class GitHubInboxPanel extends HTMLElement {
     const el = this.shadowRoot.getElementById("tiles");
     const snap = this._snap;
     if (!snap) {
-      el.innerHTML = "";
+      const state = this._error ? "Unavailable" : "Connecting";
+      el.innerHTML = ["Open issues", "Open pull requests", "Unseen", "Waiting on you"]
+        .map((label) => `<div class="tile"><div class="txt"><div class="k">${label}</div><div class="v">—</div><div class="sub">${state}</div></div></div>`).join("");
       return;
     }
     const t = snap.totals;
@@ -425,9 +431,11 @@ class GitHubInboxPanel extends HTMLElement {
       })
       .join("")}</div>`;
     const oldest = snap.oldest;
-    const tile = (icon, k, v, sub, extra = "", act = "") =>
-      `<div class="tile"${act}><div class="ico">${icon}</div><div class="txt"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="sub">${sub}</div>` : ""}${extra}</div></div>`;
-    const btn = (act, tip, more = "") => ` data-act="${act}" tabindex="0" role="button" data-tip="${esc(tip)}"${more}`;
+    const tile = (icon, k, v, sub, extra = "", act = "") => {
+      const tag = act ? "button" : "div";
+      return `<${tag} class="tile"${act}${act ? ' type="button"' : ""}><div class="ico">${icon}</div><div class="txt"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="sub">${sub}</div>` : ""}${extra}</div></${tag}>`;
+    };
+    const btn = (act, tip, more = "") => ` data-act="${act}" aria-label="${esc(tip)}" data-tip="${esc(tip)}"${more}`;
     const show = (filter, what) => btn("show", `Show ${what} in the list`, ` data-filter="${filter}" aria-pressed="${this._filter === filter}"`);
     el.innerHTML = [
       tile(G.issue(cv("--s1")), "Open issues", t.issues, `${esc(snap.by_repo.filter((r) => r.issues).length)} repositories`, "", show("issue", "open issues")),
@@ -444,7 +452,7 @@ class GitHubInboxPanel extends HTMLElement {
   _renderCI() {
     const el = this.shadowRoot.getElementById("ci-content");
     const snap = this._snap;
-    if (!snap) { el.innerHTML = ""; return; }
+    if (!snap) { el.innerHTML = `<div class="empty">${this._error ? "CI status unavailable" : "Loading CI status"}</div>`; return; }
     const counts = snap.ci_totals || {};
     const tiles = [["Failing CI", "failing", "--crit"], ["Running", "running", "--warn"], ["Passing", "passing", "--good"]]
       .map(([label, state, color]) => `<div class="tile"><span class="dot" style="background:var(${color})"></span><div class="txt"><div class="k">${label}</div><div class="v">${Number(counts[state] || 0)}</div></div></div>`).join("");
@@ -494,7 +502,7 @@ class GitHubInboxPanel extends HTMLElement {
     const el = this.shadowRoot.getElementById("charts");
     const snap = this._snap;
     if (!snap) {
-      el.innerHTML = this._error ? "" : `<div class="card wide"><div class="empty">Loading the inbox</div></div>`;
+      el.innerHTML = `<div class="card wide"><div class="empty">${this._error ? "Inbox charts unavailable" : "Loading the inbox"}</div></div>`;
       return;
     }
     if (!snap.sync.length) {
@@ -622,7 +630,7 @@ ${total ? `<span class="tot" style="bottom:calc(${h(total)} + 3px)">${total}</sp
     const el = this.shadowRoot.getElementById("list");
     const count = this.shadowRoot.getElementById("count");
     if (!this._snap) {
-      el.innerHTML = "";
+      el.innerHTML = `<div class="empty">${this._error ? "Inbox unavailable" : "Loading open items"}</div>`;
       return;
     }
     const items = this._visible();
