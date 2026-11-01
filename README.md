@@ -20,6 +20,12 @@ Without Home Assistant Cloud or an external URL, setup says what is missing and 
 
 GitHub Inbox in the sidebar, for administrators. Dark by default, with a light toggle.
 
+![GitHub Inbox overview with activity, CI and repository summaries](docs/images/dashboard-overview-preview.png)
+
+![GitHub Inbox list filtered to open issues](docs/images/dashboard-filtered-preview.png)
+
+These previews render the committed panel with invented repositories and activity; they do not contain account data.
+
 | Part | What it shows |
 |---|---|
 | Tiles | Open issues, open pull requests (drafts counted apart), unseen items, items waiting on you, repositories, the oldest open item, and the last 7 days' activity with a sparkline. Click a tile to open its items: the first four filter the list (click again to clear), Repositories lists every item by repository, Oldest open opens that item, Activity goes to Recent activity. |
