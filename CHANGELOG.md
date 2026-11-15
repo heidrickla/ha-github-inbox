@@ -2,6 +2,12 @@
 
 Everything a user of this integration would notice, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version numbers are the ones in `manifest.json`.
 
+## [0.1.9] - 2026-11-14
+
+### Fixed
+
+- A disabled workflow no longer keeps a repository's CI failing with its last run, and Dependabot update jobs no longer count as CI.
+
 ## [0.1.8] - 2026-10-31
 
 ### Added
