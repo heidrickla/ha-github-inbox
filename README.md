@@ -36,7 +36,7 @@ These previews render the committed panel with invented repositories and activit
 | The list | Every open item: title, number, repository, author, labels, age, the last word, `+additions −deletions` for pull requests and the comment count. Filter by kind, unseen or waiting; pick a repository; search; sort. |
 | An open item | The description, then the timeline: every comment, review and line comment as one line (author, verb or review state, preview, time) that expands on click. Expand all, Collapse all, Open on GitHub. Opening an item marks it seen. |
 | Recent activity | The newest 25 events across all repositories. |
-| GitHub Actions CI | Failing, running and passing counts, then every installed repository with its latest default-branch run per workflow. |
+| GitHub Actions CI | Failing, running and passing counts, then every installed repository with its latest default-branch run per active workflow; Dependabot update jobs are not counted. |
 
 An item is unseen when someone other than you has written on it since you last opened it. It is waiting on you when the last comment or review is someone else's. You are the logins in the Your GitHub logins option.
 
@@ -140,7 +140,7 @@ Home Assistant asks for re-authentication when GitHub stops accepting the app's 
 
 GitHub delivers each change to the webhook as it happens. Each delivery is checked against the app's webhook secret before it is read, and applied at once; a few seconds later the item is read from GitHub for its rendered text and full timeline.
 
-A full sync runs at setup, on the resync action and the panel's Sync now, after Home Assistant Cloud reconnects, and when repositories are added to the installation or renamed. It reads only the items that changed since the stored copy, plus the latest 50 default-branch Actions runs per repository, and notifies once for anything it found that no webhook delivered. A repository GitHub refuses to list, or a listing cut short, keeps its stored items until a later sync reads it in full. An unreadable Actions listing keeps that repository's stored CI. A failed sync retries after 5, 15 and then 60 minutes.
+A full sync runs at setup, on the resync action and the panel's Sync now, after Home Assistant Cloud reconnects, and when repositories are added to the installation or renamed. It reads only the items that changed since the stored copy, plus each repository's workflow list and its latest 50 default-branch Actions runs, and notifies once for anything it found that no webhook delivered. A repository GitHub refuses to list, or a listing cut short, keeps its stored items until a later sync reads it in full. An unreadable Actions listing keeps that repository's stored CI. A failed sync retries after 5, 15 and then 60 minutes.
 
 Activity on a closed issue or a merged pull request does not return it to the list. A renamed repository keeps its items, seen marks and activity under the new name.
 
