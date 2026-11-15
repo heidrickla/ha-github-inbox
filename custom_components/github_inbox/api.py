@@ -360,6 +360,14 @@ class InstallationClient:
             raise GitHubConnectionError(f"{path}: the answer has no workflow_runs")
         return [row for row in data["workflow_runs"] if isinstance(row, dict)]
 
+    async def workflows(self, repo: str) -> list[dict[str, Any]]:
+        """The repository's Actions workflows with their state, in one response."""
+        path = f"{repo_path(repo)}/actions/workflows"
+        data, _ = await self._get(path, {"per_page": "100"}, ACCEPT_JSON)
+        if not isinstance(data, dict) or not isinstance(data.get("workflows"), list):
+            raise GitHubConnectionError(f"{path}: the answer has no workflows")
+        return [row for row in data["workflows"] if isinstance(row, dict)]
+
     async def open_issues(self, repo: str) -> Listing:
         """Open issues and pull requests; GitHub lists both as issues."""
         return await self.listing(

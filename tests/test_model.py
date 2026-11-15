@@ -48,8 +48,9 @@ def test_ci_aggregation_and_latest_per_workflow() -> None:
         workflow_run(3, conclusion="failure"),
         workflow_run(2, workflow_id=20, conclusion="cancelled"),
     ]
-    workflows = model.ci_workflows(rows, "main")
+    workflows = model.ci_workflows(rows, "main", {10, 20})
     assert {key: run["id"] for key, run in workflows.items()} == {"10": 4, "20": 2}
+    assert set(model.ci_workflows(rows, "main", {10})) == {"10"}
     assert model.ci_state(workflows) == "cancelled"
     assert model.ci_state({}) == "no_ci"
     assert (
@@ -61,6 +62,21 @@ def test_ci_aggregation_and_latest_per_workflow() -> None:
         )
         == "failing"
     )
+
+
+@pytest.mark.parametrize(
+    ("workflow", "counted"),
+    [
+        ({"state": "active", "path": ".github/workflows/tests.yml"}, True),
+        ({"state": "active", "path": "dynamic/github-code-scanning/codeql"}, True),
+        ({"path": ".github/workflows/tests.yml"}, True),
+        ({"state": "disabled_manually", "path": ".github/workflows/r2.yml"}, False),
+        ({"state": "disabled_inactivity", "path": ".github/workflows/x.yml"}, False),
+        ({"state": "active", "path": "dynamic/dependabot/dependabot-updates"}, False),
+    ],
+)
+def test_counts_as_ci(workflow: dict[str, str], counted: bool) -> None:
+    assert model.counts_as_ci(workflow) is counted
 
 
 NOW = dt.datetime(2026, 10, 23, 12, 0, tzinfo=dt.UTC)

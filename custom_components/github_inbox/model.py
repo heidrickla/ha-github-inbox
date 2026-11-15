@@ -358,15 +358,28 @@ def newer_ci_run(new: Mapping[str, Any], old: Mapping[str, Any]) -> bool:
     )
 
 
+def counts_as_ci(workflow: Mapping[str, Any]) -> bool:
+    """Whether a workflow's latest run says anything about the default branch now.
+
+    A disabled workflow never runs again, so its last result would stand forever; Dependabot's
+    update jobs share one workflow across unrelated dependencies and test nothing.
+    A webhook's workflow carries no state when GitHub omits it; one that just ran is active.
+    """
+    return str(workflow.get("state") or "active") == "active" and not str(
+        workflow.get("path") or ""
+    ).startswith("dynamic/dependabot/")
+
+
 def ci_workflows(
-    rows: Iterable[Mapping[str, Any]], branch: str
+    rows: Iterable[Mapping[str, Any]], branch: str, counted: Set[int]
 ) -> dict[str, dict[str, Any]]:
+    """The newest run per counted workflow (ids from `counts_as_ci`) on the branch."""
     workflows: dict[str, dict[str, Any]] = {}
     for raw in rows:
         if (
             raw.get("head_branch") != branch
-            or not raw.get("workflow_id")
             or not raw.get("id")
+            or raw.get("workflow_id") not in counted
         ):
             continue
         run = ci_run(raw)

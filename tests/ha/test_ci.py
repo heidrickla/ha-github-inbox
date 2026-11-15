@@ -97,6 +97,79 @@ async def test_sync_builds_ci_and_websocket_shape(
     assert snap["ci"][1]["state"] == "no_ci"
 
 
+async def test_disabled_workflows_and_dependabot_jobs_are_not_ci(
+    hass: HomeAssistant, pem: str, github: GitHub
+) -> None:
+    github.token()
+    github.repos(
+        [REPO],
+        runs_by_repo={
+            REPO: [
+                workflow_run(3),
+                workflow_run(2, workflow_id=20, name="Upload", conclusion="failure"),
+                workflow_run(
+                    1, workflow_id=30, name="Dependabot", conclusion="failure"
+                ),
+            ]
+        },
+        workflows_by_repo={
+            REPO: [
+                {"id": 10, "state": "active", "path": ".github/workflows/tests.yml"},
+                {
+                    "id": 20,
+                    "state": "disabled_manually",
+                    "path": ".github/workflows/r2.yml",
+                },
+                {
+                    "id": 30,
+                    "state": "active",
+                    "path": "dynamic/dependabot/dependabot-updates",
+                },
+            ]
+        },
+    )
+    github.issues([])
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=ACCOUNT,
+        unique_id=str(ACCOUNT_ID),
+        data=entry_data(pem),
+        options=OPTIONS,
+    )
+    inbox = await setup_entry(hass, entry)
+    assert set(inbox.store.data["ci"][REPO]["workflows"]) == {"10"}
+    assert inbox.data["failing_ci"] == 0
+
+    def receive(guid: str, workflow: dict[str, Any], run: dict[str, Any]) -> None:
+        inbox.async_receive(
+            "workflow_run",
+            guid,
+            {
+                "repository": {"full_name": REPO, "default_branch": "main"},
+                "workflow": workflow,
+                "workflow_run": run,
+            },
+        )
+
+    receive(
+        "dependabot",
+        {"id": 30, "state": "active", "path": "dynamic/dependabot/dependabot-updates"},
+        workflow_run(5, workflow_id=30, conclusion="failure"),
+    )
+    receive(
+        "disabled",
+        {"id": 20, "state": "disabled_manually", "path": ".github/workflows/r2.yml"},
+        workflow_run(6, workflow_id=20, conclusion="failure"),
+    )
+    assert set(inbox.store.data["ci"][REPO]["workflows"]) == {"10"}
+    receive(
+        "codeql",
+        {"id": 40, "state": "active", "path": "dynamic/github-code-scanning/codeql"},
+        workflow_run(7, workflow_id=40, conclusion="failure"),
+    )
+    assert inbox.data["failing_ci"] == 1
+
+
 @pytest.mark.parametrize("error", [GitHubForbiddenError, GitHubNotFoundError])
 async def test_refused_ci_read_keeps_stored_runs(
     hass: HomeAssistant, pem: str, github: GitHub, error: type[Exception]

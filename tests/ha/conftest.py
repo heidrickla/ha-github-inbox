@@ -158,6 +158,7 @@ class GitHub:
         status: int = 200,
         archived: Iterable[str] = (),
         runs_by_repo: Mapping[str, list[dict[str, Any]]] | None = None,
+        workflows_by_repo: Mapping[str, list[dict[str, Any]]] | None = None,
     ) -> None:
         rows: list[dict[str, Any]] = [
             {"full_name": n, "archived": False, "default_branch": "main"} for n in names
@@ -171,10 +172,22 @@ class GitHub:
         )
         for row in rows:
             if row.get("full_name") and not row.get("archived"):
-                self.runs(
-                    (runs_by_repo or {}).get(row["full_name"], []),
-                    repo=row["full_name"],
+                runs = (runs_by_repo or {}).get(row["full_name"], [])
+                self.m.get(
+                    f"{API}/repos/{row['full_name']}/actions/workflows",
+                    json={
+                        "workflows": (workflows_by_repo or {}).get(row["full_name"])
+                        or [
+                            {
+                                "id": i,
+                                "state": "active",
+                                "path": f".github/workflows/{i}.yml",
+                            }
+                            for i in sorted({r["workflow_id"] for r in runs})
+                        ]
+                    },
                 )
+                self.runs(runs, repo=row["full_name"])
 
     def runs(
         self, rows: list[dict[str, Any]], repo: str = REPO, status: int = 200

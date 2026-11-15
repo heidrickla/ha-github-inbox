@@ -293,11 +293,15 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return branch, None
             async with gate:
                 try:
+                    defined = await self.client.workflows(repo)
                     rows = await self.client.workflow_runs(repo, branch)
                 except (GitHubForbiddenError, GitHubNotFoundError) as err:
                     _LOGGER.warning("GitHub refused Actions runs for %s: %s", repo, err)
                     return branch, None
-            return branch, model.ci_workflows(rows, branch)
+            counted = {
+                int(w["id"]) for w in defined if w.get("id") and model.counts_as_ci(w)
+            }
+            return branch, model.ci_workflows(rows, branch, counted)
 
         ci_lists = await asyncio.gather(*(ci_listing(n) for n in names))
 
@@ -850,7 +854,9 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             stored.get(repo, {}).get("default_branch") or repo_obj["default_branch"]
         )
         raw = p["workflow_run"]
-        if raw.get("head_branch") != branch:
+        if raw.get("head_branch") != branch or not model.counts_as_ci(
+            p.get("workflow") or {"path": raw.get("path")}
+        ):
             return
         run = model.ci_run(raw)
         key = str(run["workflow_id"])
