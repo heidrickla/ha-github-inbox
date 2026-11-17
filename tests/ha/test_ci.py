@@ -170,6 +170,52 @@ async def test_disabled_workflows_and_dependabot_jobs_are_not_ci(
     assert inbox.data["failing_ci"] == 1
 
 
+async def test_a_workflow_quieter_than_the_runs_page_is_read_on_its_own(
+    hass: HomeAssistant, pem: str, github: GitHub
+) -> None:
+    """The runs page holds the newest 50; a nightly job older than that still counts."""
+    phone = async_mock_service(hass, "notify", "mobile_app_phone")
+    github.token()
+    busy = [workflow_run(100 + n) for n in range(50)]
+    github.repos(
+        [REPO],
+        runs_by_repo={REPO: busy},
+        workflows_by_repo={
+            REPO: [
+                {"id": 10, "state": "active", "path": ".github/workflows/tests.yml"},
+                {"id": 20, "state": "active", "path": ".github/workflows/nightly.yml"},
+                {"id": 30, "state": "active", "path": ".github/workflows/pr.yml"},
+            ]
+        },
+    )
+    github.workflow_runs(
+        20, [workflow_run(7, workflow_id=20, name="Nightly", conclusion="failure")]
+    )
+    github.workflow_runs(30, [])
+    github.issues([])
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=ACCOUNT,
+        unique_id=str(ACCOUNT_ID),
+        data=entry_data(pem),
+        options={**OPTIONS, CONF_NOTIFY_TARGETS: ["mobile_app_phone"]},
+    )
+    inbox = await setup_entry(hass, entry)
+    assert set(inbox.store.data["ci"][REPO]["workflows"]) == {"10", "20"}
+    assert inbox.store.data["ci"][REPO]["failed"] == ["Nightly"]
+    assert inbox.data["failing_ci"] == 1
+
+    # A later sync whose page again misses the nightly job must not call it recovered.
+    async def runs(repo: str, branch: str) -> list[dict[str, Any]]:
+        return [workflow_run(200)]
+
+    with patch.object(inbox.client, "workflow_runs", side_effect=runs):
+        await inbox.async_refresh()
+    await later(hass)
+    assert inbox.store.data["ci"][REPO]["settled"] == "failing"
+    assert phone == []
+
+
 @pytest.mark.parametrize("error", [GitHubForbiddenError, GitHubNotFoundError])
 async def test_refused_ci_read_keeps_stored_runs(
     hass: HomeAssistant, pem: str, github: GitHub, error: type[Exception]

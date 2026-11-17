@@ -350,9 +350,18 @@ class InstallationClient:
 
     async def workflow_runs(self, repo: str, branch: str) -> list[dict[str, Any]]:
         """The newest 50 default-branch Actions runs, in one response."""
-        path = f"{repo_path(repo)}/actions/runs"
+        return await self._runs(f"{repo_path(repo)}/actions/runs", branch, 50)
+
+    async def latest_workflow_run(
+        self, repo: str, workflow_id: int, branch: str
+    ) -> list[dict[str, Any]]:
+        """One workflow's newest default-branch run, as a list of none or one."""
+        path = f"{repo_path(repo)}/actions/workflows/{int(workflow_id)}/runs"
+        return await self._runs(path, branch, 1)
+
+    async def _runs(self, path: str, branch: str, count: int) -> list[dict[str, Any]]:
         data, _ = await self._get(
-            path, {"branch": branch, "per_page": "50"}, ACCEPT_JSON
+            path, {"branch": branch, "per_page": str(count)}, ACCEPT_JSON
         )
         if not isinstance(data, dict) or not isinstance(
             data.get("workflow_runs"), list

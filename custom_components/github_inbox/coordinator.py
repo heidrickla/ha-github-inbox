@@ -294,13 +294,25 @@ class InboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             async with gate:
                 try:
                     defined = await self.client.workflows(repo)
+                    counted = {
+                        int(w["id"])
+                        for w in defined
+                        if w.get("id") and model.counts_as_ci(w)
+                    }
                     rows = await self.client.workflow_runs(repo, branch)
+                    # The page holds only the newest 50 runs; a quieter workflow is read on its own.
+                    listed = {
+                        r.get("workflow_id")
+                        for r in rows
+                        if r.get("head_branch") == branch
+                    }
+                    for workflow_id in sorted(counted - listed):
+                        rows += await self.client.latest_workflow_run(
+                            repo, workflow_id, branch
+                        )
                 except (GitHubForbiddenError, GitHubNotFoundError) as err:
                     _LOGGER.warning("GitHub refused Actions runs for %s: %s", repo, err)
                     return branch, None
-            counted = {
-                int(w["id"]) for w in defined if w.get("id") and model.counts_as_ci(w)
-            }
             return branch, model.ci_workflows(rows, branch, counted)
 
         ci_lists = await asyncio.gather(*(ci_listing(n) for n in names))

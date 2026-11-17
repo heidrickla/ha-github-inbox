@@ -198,6 +198,14 @@ class GitHub:
             json={"workflow_runs": rows},
         )
 
+    def workflow_runs(
+        self, workflow_id: int, rows: list[dict[str, Any]], repo: str = REPO
+    ) -> None:
+        self.m.get(
+            f"{API}/repos/{repo}/actions/workflows/{workflow_id}/runs",
+            json={"workflow_runs": rows},
+        )
+
     def issues(
         self, rows: list[dict[str, Any]], repo: str = REPO, status: int = 200
     ) -> None:

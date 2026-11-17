@@ -60,6 +60,10 @@ async def test_actions_runs_use_default_branch_and_token_permissions(
     aioclient_mock.get(path, json={"workflows": [{"id": 10, "state": "active"}]})
     assert await c.workflows(REPO) == [{"id": 10, "state": "active"}]
     assert aioclient_mock.mock_calls[-1][1].query == {"per_page": "100"}
+    path = f"{API}/repos/{REPO}/actions/workflows/20/runs"
+    aioclient_mock.get(path, json={"workflow_runs": [{"id": 7}]})
+    assert await c.latest_workflow_run(REPO, 20, "main") == [{"id": 7}]
+    assert aioclient_mock.mock_calls[-1][1].query == {"branch": "main", "per_page": "1"}
 
 
 @pytest.fixture
