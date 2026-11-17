@@ -355,3 +355,10 @@ def test_bots_and_logins() -> None:
     assert not model.is_bot({"login": "someone", "type": "User"})
     assert not model.is_bot(None)
     assert model.login(None) == ""
+
+
+def test_an_item_older_than_a_year_is_in_the_last_age_bucket() -> None:
+    now = dt.datetime(2026, 11, 16, tzinfo=dt.UTC)
+    last = len(model.AGE_BUCKETS) - 1
+    assert model._age_bucket(now - dt.timedelta(days=400), now) == last
+    assert model._age_bucket(now - dt.timedelta(days=364), now) == last - 1

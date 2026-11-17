@@ -323,7 +323,8 @@ def summary(item: Item, is_unseen: bool, account: str, me: Set[str]) -> dict[str
 
 def _age_bucket(created: dt.datetime | None, now: dt.datetime) -> int:
     days = (now - created).total_seconds() / 86400 if created else 0.0
-    for i, (_, limit) in enumerate(AGE_BUCKETS):
+    # The last bucket takes everything older than the one before it.
+    for i, (_, limit) in enumerate(AGE_BUCKETS[:-1]):
         if days < limit:
             return i
     return len(AGE_BUCKETS) - 1

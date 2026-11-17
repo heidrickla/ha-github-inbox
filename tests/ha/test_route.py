@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import enum
 import sys
 import types
@@ -293,3 +294,15 @@ async def test_connection_changes_are_reported_on_the_loop(
     changed(State.CLOUD_DISCONNECTED)
     changed(State.CLOUD_CONNECTED)
     assert calls == [False, True]
+
+
+async def test_two_first_reads_of_the_cloudhook_set_share_one(
+    hass: HomeAssistant,
+) -> None:
+    async def slow_load(self: Any) -> None:
+        await asyncio.sleep(0)
+
+    # Both calls wait on the store at once, so the second finds the first's set.
+    with patch.object(route.Store, "async_load", slow_load):
+        first, second = await asyncio.gather(route._hooks(hass), route._hooks(hass))
+    assert first is second

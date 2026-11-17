@@ -24,6 +24,7 @@ from pytest_homeassistant_custom_component.test_util.aiohttp import (
 )
 
 from custom_components.github_inbox import route, views
+from custom_components.github_inbox.config_flow import GitHubInboxConfigFlow
 from custom_components.github_inbox.const import (
     APP_EVENTS,
     CONF_ADVANCED,
@@ -1017,3 +1018,9 @@ async def test_blank_logins_mean_the_account(
         },
     )
     assert loaded.options[CONF_ME] == [ACCOUNT]
+
+
+def test_a_step_before_the_app_exists_is_refused() -> None:
+    flow = GitHubInboxConfigFlow()
+    with pytest.raises(RuntimeError, match="before the app existed"):
+        flow._credentials()

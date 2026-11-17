@@ -908,3 +908,19 @@ async def test_activity_listeners_and_event_entity(
         "opened",
         "closed",
     ]
+
+
+async def test_other_installation_actions_change_nothing(
+    hass: HomeAssistant,
+    inbox: InboxCoordinator,
+    client: Any,
+    github: GitHub,
+) -> None:
+    await deliver(client, "installation", installation("deleted"), guid="a")
+    assert inbox.installation_lost
+    await deliver(
+        client, "installation", installation("new_permissions_requested"), guid="b"
+    )
+    assert inbox.installation_lost
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert [f["context"]["source"] for f in flows] == [SOURCE_REAUTH]

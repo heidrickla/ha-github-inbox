@@ -498,3 +498,50 @@ async def test_existing_ci_entry_without_settled_starts_without_notice(
     assert phone == []
     assert inbox.store.data["ci"][REPO]["settled"] == "failing"
     assert inbox.store.data["ci"][REPO]["failed"] == ["Tests"]
+
+
+async def test_a_run_delivered_during_a_sync_is_kept(
+    hass: HomeAssistant, pem: str, github: GitHub
+) -> None:
+    inbox = await ci_inbox(hass, pem, github, [workflow_run(10)])
+    real = inbox.client.workflow_runs
+
+    async def racing(repo: str, branch: str) -> list[dict[str, Any]]:
+        rows = await real(repo, branch)
+        if repo == REPO:
+            inbox.async_receive(
+                "workflow_run",
+                "mid-sync",
+                {
+                    "repository": {"full_name": REPO, "default_branch": "main"},
+                    "workflow": {
+                        "id": 20,
+                        "state": "active",
+                        "path": ".github/workflows/nightly.yml",
+                    },
+                    "workflow_run": workflow_run(
+                        12, workflow_id=20, name="Nightly", conclusion="failure"
+                    ),
+                },
+            )
+        return rows
+
+    with patch.object(inbox.client, "workflow_runs", side_effect=racing):
+        await inbox.async_refresh()
+    assert set(inbox.store.data["ci"][REPO]["workflows"]) == {"10", "20"}
+    assert inbox.data["failing_ci"] == 1
+
+
+async def test_a_run_for_a_repository_outside_the_installation_is_ignored(
+    hass: HomeAssistant, pem: str, github: GitHub
+) -> None:
+    inbox = await ci_inbox(hass, pem, github, [workflow_run(1)])
+    inbox.async_receive(
+        "workflow_run",
+        "elsewhere",
+        {
+            "repository": {"full_name": "someone/else", "default_branch": "main"},
+            "workflow_run": workflow_run(9, repo="someone/else", conclusion="failure"),
+        },
+    )
+    assert "someone/else" not in inbox.store.data["ci"]

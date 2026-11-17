@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.components import frontend, persistent_notification, webhook
@@ -32,6 +32,7 @@ from custom_components.github_inbox.const import (
     DOMAIN,
     ISSUE_WEBHOOK_ROUTE,
     PANEL_URL,
+    REFRESH_DELAY,
     SIGNAL_UPDATED,
     SYNC_RETRY,
 )
@@ -44,7 +45,7 @@ from tests.ha.conftest import (
     entry_data,
     setup_entry,
 )
-from tests.payloads import REPO, comment, issue, pull, review, user
+from tests.payloads import REPO, comment, issue, pull, review, review_comment, user
 
 ISSUES = "sensor.github_heidrickla_open_issues"
 PRS = "sensor.github_heidrickla_open_pull_requests"
@@ -560,3 +561,70 @@ async def test_the_panel_stays_while_another_inbox_is_loaded(
     await setup_entry(hass, other)
     assert await hass.config_entries.async_unload(config_entry.entry_id)
     assert frontend.async_panel_exists(hass, PANEL_URL)
+
+
+async def test_a_sync_drops_the_syncs_already_scheduled(
+    hass: HomeAssistant, config_entry: MockConfigEntry, github: GitHub
+) -> None:
+    seed(github)
+    coordinator = await setup_entry(hass, config_entry)
+    before = github.calls("get", "/installation/repositories")
+    coordinator.schedule_sync()
+    coordinator.schedule_sync()
+    await coordinator.async_refresh()
+    assert github.calls("get", "/installation/repositories") == before + 1
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + dt.timedelta(seconds=REFRESH_DELAY + 1)
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert github.calls("get", "/installation/repositories") == before + 1
+
+
+async def test_an_unexpected_sync_error_is_shown_and_raised(
+    hass: HomeAssistant, config_entry: MockConfigEntry, github: GitHub
+) -> None:
+    seed(github)
+    coordinator = await setup_entry(hass, config_entry)
+    with patch.object(coordinator, "_sync", side_effect=RuntimeError("boom")):
+        await coordinator.async_refresh()
+    assert not coordinator.last_update_success
+    assert coordinator.sync_state == "failed"
+    assert coordinator.sync_error == "boom"
+
+
+async def test_unload_stops_when_a_platform_will_not_unload(
+    hass: HomeAssistant, config_entry: MockConfigEntry, github: GitHub
+) -> None:
+    seed(github)
+    await setup_entry(hass, config_entry)
+    with patch.object(
+        hass.config_entries,
+        "async_unload_platforms",
+        AsyncMock(return_value=False),
+    ):
+        assert not await hass.config_entries.async_unload(config_entry.entry_id)
+    assert config_entry.state is ConfigEntryState.FAILED_UNLOAD
+
+
+async def test_a_sync_does_not_list_review_comments_as_activity(
+    hass: HomeAssistant, config_entry: MockConfigEntry, github: GitHub
+) -> None:
+    seed(github)
+    coordinator = await setup_entry(hass, config_entry)
+    github.reset()
+    github.token()
+    github.repos([REPO])
+    later = "2099-01-01T00:00:00Z"
+    github.issues([issue(2, comments=1), issue(5, pull_request=True, updated=later)])
+    github.comments(2, [comment(11)])
+    github.pull(
+        5,
+        pull(5, updated=later),
+        reviews=[review(7, "APPROVED")],
+        review_comments=[review_comment(30, at=later)],
+    )
+    await coordinator.async_refresh()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    kinds = [e["kind"] for e in coordinator.items[f"{REPO}#5"]["timeline"]]
+    assert "review_comment" in kinds
+    assert coordinator.store.data["activity"] == []

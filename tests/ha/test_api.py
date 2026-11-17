@@ -410,3 +410,16 @@ async def test_manifest_conversion(
     aioclient_mock.post(url, status=201, json={"id": APP_ID})
     with pytest.raises(GitHubError, match="without the app's credentials"):
         await api.convert_manifest(session, "code/1")
+
+
+async def test_actions_answers_without_their_list_are_connection_errors(
+    session: aiohttp.ClientSession, aioclient_mock: AiohttpClientMocker, pem: str
+) -> None:
+    mint(aioclient_mock)
+    aioclient_mock.get(f"{API}/repos/{REPO}/actions/runs", json={"total_count": 0})
+    aioclient_mock.get(f"{API}/repos/{REPO}/actions/workflows", json={"total_count": 0})
+    c = client(session, pem)
+    with pytest.raises(GitHubConnectionError, match="no workflow_runs"):
+        await c.workflow_runs(REPO, "main")
+    with pytest.raises(GitHubConnectionError, match="no workflows"):
+        await c.workflows(REPO)
