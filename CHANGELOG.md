@@ -2,6 +2,12 @@
 
 Everything a user of this integration would notice, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version numbers are the ones in `manifest.json`.
 
+## [Unreleased]
+
+### Fixed
+
+- A workflow that runs less often than the repository's other workflows, such as a nightly job, no longer drops out of CI status. A failing one no longer sends a recovery notice.
+
 ## [0.1.9] - 2026-11-14
 
 ### Fixed
